@@ -1,0 +1,45 @@
+# Image Matching Challenge 2025 Configuration
+# Example experiment configuration
+
+# Data settings
+data_dir: "dataset"
+batch_size: 32
+num_workers: 4
+
+# Model settings
+model_type: "advanced"  # options: basic, advanced
+feature_dim: 512
+backbone: "resnet50"    # options: resnet50, efficientnet_b3, vit_b_16
+
+# Training settings
+epochs: 100
+learning_rate: 0.0001
+weight_decay: 0.00001
+optimizer: "adamw"      # options: adam, adamw, sgd
+scheduler: "cosine"     # options: cosine, step, plateau
+
+# Loss weights
+similarity_weight: 1.0
+pose_weight: 1.0
+contrastive_margin: 1.0
+rotation_weight: 1.0
+translation_weight: 1.0
+
+# Other training settings
+gradient_clip: 1.0
+early_stopping: 20
+save_interval: 10
+log_interval: 10
+
+# Paths
+log_dir: "logs"
+checkpoint_dir: "checkpoints"
+
+# Inference settings
+use_neural_similarity: true
+use_neural_pose: true
+outlier_threshold: 0.1
+max_clusters: 10
+
+# Device
+device: "cuda"  # options: cuda, cpu

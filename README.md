@@ -61,3 +61,13 @@ dataset2,cluster1,image2.png,nan;nan;nan;nan;nan;nan;nan;nan;nan,nan;nan;nan
 ```
 
 Notice that we can re-use scene labels (such as `cluster1`) for different datasets.
+
+## How to use?
+```bash
+# Create and build environment with uv
+uv venv | source .venv/bin/activate
+uv pip install -e ".[dev]"
+
+# Run following command in root directory
+uv run python image_matching_challenge_2025/train.py --data_dir dataset
+```
