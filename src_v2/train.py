@@ -13,9 +13,10 @@ from src_v2.models import DINOv2FeatureExtractor, LoFTRFeatureMatcher
 from src_v2.trainer import (
     MixedPrecisionTrainer, EMAModel, WarmupCosineScheduler, get_advanced_optimizer
 )
-from src_v2.augmentation import get_augmentation_transform
 from src_v2.metric_learning import get_metric_learning_loss
 
+import torch.nn.functional as F
+import torchvision.transforms as T
 
 class AdvancedTrainer:
     """Advanced trainer for Image Matching Challenge 2025"""
@@ -137,6 +138,10 @@ class AdvancedTrainer:
         """Create loss function based on configuration"""
         loss_type = self.config.get('loss_type', 'combined')
 
+        # BCE loss for similarity in DINOv2
+        if self.config.get('model_type', 'advanced') == 'dino':
+            return torch.nn.BCEWithLogitsLoss()
+
         if loss_type == 'arcface':
             return get_metric_learning_loss(
                 'arcface',
@@ -168,14 +173,22 @@ class AdvancedTrainer:
             )
 
     def _create_dataloaders(self):
-        """Create dataloaders with advanced augmentation"""
+        """Create dataloaders with minimal augmentation"""
         data_dir = Path(self.config['data_dir'])
 
-        # Get train transform with advanced augmentation
-        strong_aug = self.config.get('strong_augmentation', True)
-        transform = get_augmentation_transform(mode='train', strong_aug=strong_aug)
+        # Image resizing for scaling factor in patch
+        patch_size = 14  # patch size in dinov2_vitb14
+        height = ((480 + patch_size - 1) // patch_size) * patch_size  # round - 490
+        width = ((640 + patch_size - 1) // patch_size) * patch_size   # round - 644
 
-        # Use base dataloaders but with our advanced transformations
+        # Basic agmentation - To-do: Add advanced augmentation
+        transform = T.Compose([
+            T.Resize((height, width)),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        # Use base dataloaders (To-do : AUgmantation)
         return get_dataloaders(
             str(data_dir),
             batch_size=self.config.get('batch_size', 32),
@@ -183,8 +196,31 @@ class AdvancedTrainer:
             transform=transform
         )
 
+    def _prepare_model_input(self, batch):
+        """Update input format of batch data"""
+        model_type = self.config.get('model_type', 'advanced')
+
+        if model_type == 'dino':
+            # Extract only needed images from batch data
+            if 'image1' in batch and 'image2' in batch:
+                return {
+                    'image1': batch['image1'].to(self.device),
+                    'image2': batch['image2'].to(self.device)
+                }
+            elif 'img1' in batch and 'img2' in batch:
+                return {
+                    'img1': batch['img1'].to(self.device),
+                    'img2': batch['img2'].to(self.device)
+                }
+            else:
+                print(f"경고: 알 수 없는 배치 형식, 키를 확인하세요: {list(batch.keys())}")
+
+                return {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        else:
+            return {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
     def train_epoch(self, epoch):
-        """Train for one epoch with advanced techniques"""
+        """Train for one epoch with minimal augmentation"""
         self.model.train()
         total_loss = 0
 
@@ -195,45 +231,57 @@ class AdvancedTrainer:
             pbar = tqdm(pbar, desc=f'Epoch {epoch}')
 
         for batch_idx, batch in enumerate(pbar):
-            # Move data to device
-            for key in batch:
-                if isinstance(batch[key], torch.Tensor):
-                    batch[key] = batch[key].to(self.device)
+            # 첫 번째 배치에서만 구조 출력
+            if batch_idx == 0:
+                print("Structure of batch data:")
+                print(f"Batch key: {list(batch.keys())}")
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        print(f"  {k}: shape={v.shape}, dtype={v.dtype}")
+                    else:
+                        print(f"  {k}: type={type(v)}")
 
-            # Forward and backward pass with mixed precision if enabled
-            if self.use_mixed_precision:
-                loss = self.mp_trainer.train_step(batch, self.criterion)
+            # Regular training
+            model_input = self._prepare_model_input(batch)
+            outputs = self.model(model_input)
+
+            # Calculate loss - Note. DINOv2 uses similarity for BCE loss
+            if isinstance(outputs, dict) and 'similarity' in outputs:
+                # DINOv2 출력은 similarity를 포함하는 딕셔너리
+                similarity = outputs['similarity']
+                # 목표 similarity는 같은 이미지 쌍이면 1, 다른 쌍이면 0
+                target = batch['label'].to(self.device).float().view_as(similarity)
+                loss = F.binary_cross_entropy_with_logits(similarity, target)
             else:
-                # Regular training
-                outputs = self.model(batch)
                 loss = self.criterion(outputs, batch)
 
-                self.optimizer.zero_grad()
-                loss.backward()
+            # Backpropagation
+            self.optimizer.zero_grad()
+            loss.backward()
 
-                # Gradient clipping
-                if self.config.get('gradient_clip', None):
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.config['gradient_clip']
-                    )
+            # Gradient clipping
+            if self.config.get('gradient_clip', None):
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config['gradient_clip']
+                )
 
-                self.optimizer.step()
-                loss = loss.item()
+            self.optimizer.step()
 
             # Update EMA model if enabled
             if self.ema_model is not None:
                 self.ema_model.update()
 
             # Update progress bar
+            loss_value = loss.item()
             if self.config.get('use_tqdm', True):
-                pbar.set_postfix({'loss': loss})
+                pbar.set_postfix({'loss': loss_value})
 
             # Log to logger
             if batch_idx % self.config.get('log_interval', 10) == 0:
-                self.logger.info(f'Train Epoch: {epoch} [{batch_idx}/{len(self.train_loader)}] Loss: {loss:.6f}')
+                self.logger.info(f'Train Epoch: {epoch} [{batch_idx}/{len(self.train_loader)}] Loss: {loss_value:.6f}')
 
-            total_loss += loss
+            total_loss += loss_value
 
         # Average loss
         avg_loss = total_loss / len(self.train_loader)
@@ -369,8 +417,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Advanced Training for Image Matching Challenge')
 
     # Data parameters
-    parser.add_argument('--data_dir', type=str, required=True,
-                        help='Path to the training data directory')
+    parser.add_argument('--data_dir', type=str, default='data/')
 
     # Model parameters
     parser.add_argument('--model_type', type=str, default='dino',
