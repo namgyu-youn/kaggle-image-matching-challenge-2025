@@ -4,9 +4,9 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from pathlib import Path
 
-from image_matching_challenge_2025.models import ImageMatchingModel, AdvancedMatchingModel
-from image_matching_challenge_2025.loss import CombinedLoss
-from image_matching_challenge_2025.dataset import get_dataloaders
+from src.models import ImageMatchingModel, AdvancedMatchingModel
+from src.loss import CombinedLoss
+from src.dataset import get_dataloaders
 
 
 class Trainer:
@@ -40,8 +40,10 @@ class Trainer:
         self.scheduler = self._get_scheduler()
 
         # Data loaders
+        data_dir = Path(config['data_dir']).absolute()
+        print(f"Loading data from: {data_dir}")
         self.train_loader, self.val_loader = get_dataloaders(
-            config['data_dir'],
+            str(data_dir),  # Convert to string for compatibility
             batch_size=config.get('batch_size', 32),
             num_workers=config.get('num_workers', 4)
         )

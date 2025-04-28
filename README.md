@@ -69,5 +69,15 @@ uv venv | source .venv/bin/activate
 uv pip install -e ".[dev]"
 
 # Run following command in root directory
-uv run python image_matching_challenge_2025/train.py --data_dir dataset
+uv run python image-matching-challenge-2025/train.py --data_dir dataset
+
+# Run v2 in CUDA
+uv run python src_v2/train.py \
+    --data_dir dataset \
+    --model_type advanced \
+    --feature_dim 512 \
+    --batch_size 32 \
+    --learning_rate 0.0001 \
+    --epochs 100 \
+    --device cuda
 ```

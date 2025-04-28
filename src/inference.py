@@ -7,9 +7,9 @@ import argparse
 import json
 from collections import defaultdict
 
-from image_matching_challenge_2025.models import ImageMatchingModel, AdvancedMatchingModel
-from image_matching_challenge_2025.dataset import ImageMatchingDataset
-from image_matching_challenge_2025.functions import (
+from src.models import ImageMatchingModel, AdvancedMatchingModel
+from src.dataset import ImageMatchingDataset
+from src.functions import (
     extract_sift_features, match_features, estimate_fundamental_matrix,
     compute_similarity_matrix, spectral_clustering, detect_outliers,
     estimate_camera_intrinsics,

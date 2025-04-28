@@ -1,10 +1,11 @@
 import argparse
 import json
+import os
 from pathlib import Path
 import torch
 # import yaml  # Optional if you want to use YAML configs
 
-from image_matching_challenge_2025.trainer import Trainer
+from src.trainer import Trainer
 
 
 def parse_arguments():
@@ -118,6 +119,12 @@ def main():
 
     print("Configuration:")
     print(json.dumps(config, indent=2))
+
+    # Debug: Print current working directory
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Data directory path: {Path(config['data_dir']).absolute()}")
+    print(f"Data directory exists: {Path(config['data_dir']).exists()}")
+    print(f"Train directory exists: {(Path(config['data_dir']) / 'train').exists()}")
 
     # Create directories
     Path(config['log_dir']).mkdir(parents=True, exist_ok=True)
