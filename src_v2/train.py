@@ -158,7 +158,7 @@ class AdvancedTrainer:
             )
         else:
             # Default combined loss from base version
-            from image_matching_challenge_2025.loss import CombinedLoss
+            from src.loss import CombinedLoss
             return CombinedLoss(
                 similarity_weight=self.config.get('similarity_weight', 1.0),
                 pose_weight=self.config.get('pose_weight', 1.0),
@@ -382,7 +382,7 @@ def parse_arguments():
                         help='DINOv2 model variant')
 
     # Training parameters
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=8,
                         help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of training epochs')
@@ -413,7 +413,7 @@ def parse_arguments():
     # Other parameters
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
-    parser.add_argument('--num_workers', type=int, default=4,
+    parser.add_argument('--num_workers', type=int, default=0,
                         help='Number of data loader workers')
     parser.add_argument('--gradient_clip', type=float, default=1.0,
                         help='Gradient clipping value')

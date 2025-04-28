@@ -7,7 +7,6 @@ from .models import (
     PoseEstimator,
     ImageMatchingModel,
     SuperPointDetector,
-    AdvancedMatchingModel,
 )
 from .loss import (
     ContrastiveLoss,
@@ -31,7 +30,6 @@ __all__ = [
     "PoseEstimator",
     "ImageMatchingModel",
     "SuperPointDetector",
-    "AdvancedMatchingModel",
     "ContrastiveLoss",
     "TripletLoss",
     "PoseLoss",

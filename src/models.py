@@ -92,7 +92,7 @@ class SimilarityNetwork(nn.Module):
 
         # Enhanced similarity prediction head with non-linearities
         self.similarity = nn.Sequential(
-            nn.Linear(feature_dim * 2, 512),
+            nn.Linear(feature_dim * 4, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),

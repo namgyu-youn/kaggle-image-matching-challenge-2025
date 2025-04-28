@@ -145,7 +145,7 @@ class CombinedLoss(nn.Module):
                 targets.get('translation', None)
             )
             total_loss += self.pose_weight * pose_loss
-            loss_dict['pose_loss'] = pose_loss.item()
+            loss_dict['pose_loss'] = float(pose_loss)
 
         loss_dict['total_loss'] = total_loss.item()
 

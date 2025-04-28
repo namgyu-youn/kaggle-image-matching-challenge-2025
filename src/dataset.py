@@ -189,10 +189,10 @@ class DatasetPairs(Dataset):
         }
 
 
-def get_dataloaders(data_dir, batch_size=32, num_workers=4):
+def get_dataloaders(data_dir, batch_size=32, num_workers=4, transform=None):
     """Create dataloaders for training and validation"""
     # Training dataset
-    train_dataset = ImageMatchingDataset(data_dir, mode='train')
+    train_dataset = ImageMatchingDataset(data_dir, mode='train', transform=transform)
     train_pairs = DatasetPairs(train_dataset)
 
     # Create split for validation

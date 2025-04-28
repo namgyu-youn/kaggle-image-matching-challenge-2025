@@ -71,13 +71,24 @@ uv pip install -e ".[dev]"
 # Run following command in root directory
 uv run python image-matching-challenge-2025/train.py --data_dir dataset
 
-# Run v2 in CUDA
+# Run v2 in Nvidia L40s
 uv run python src_v2/train.py \
     --data_dir dataset \
-    --model_type advanced \
+    --model_type dino \
+    --dino_model dinov2_vitb14 \
     --feature_dim 512 \
-    --batch_size 32 \
-    --learning_rate 0.0001 \
+    --batch_size 64 \
     --epochs 100 \
+    --learning_rate 0.0001 \
+    --weight_decay 1e-5 \
+    --warmup_epochs 5 \
+    --min_lr 1e-6 \
+    --loss_type combined \
+    --use_mixed_precision true \
+    --use_ema true \
+    --ema_decay 0.9999 \
+    --strong_augmentation true \
+    --num_workers 8 \
+    --gradient_clip 1.0 \
     --device cuda
 ```

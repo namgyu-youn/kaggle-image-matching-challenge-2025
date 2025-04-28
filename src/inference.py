@@ -7,7 +7,7 @@ import argparse
 import json
 from collections import defaultdict
 
-from src.models import ImageMatchingModel, AdvancedMatchingModel
+from src.models import ImageMatchingModel
 from src.dataset import ImageMatchingDataset
 from src.functions import (
     extract_sift_features, match_features, estimate_fundamental_matrix,
@@ -33,10 +33,7 @@ class InferencePipeline:
 
     def _load_model(self):
         """Load trained model"""
-        if self.config.get('model_type', 'basic') == 'advanced':
-            model = AdvancedMatchingModel(feature_dim=self.config.get('feature_dim', 512))
-        else:
-            model = ImageMatchingModel(feature_dim=self.config.get('feature_dim', 512))
+        model = ImageMatchingModel(feature_dim=self.config.get('feature_dim', 512))
 
         checkpoint = torch.load(self.config['checkpoint_path'], map_location=self.device)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -82,7 +79,7 @@ class InferencePipeline:
                     img_i = item_i['image'].unsqueeze(0).to(self.device)
                     img_j = item_j['image'].unsqueeze(0).to(self.device)
 
-                    if isinstance(self.model, AdvancedMatchingModel):
+                    if self.config.get('model_type', 'basic') == 'advanced':
                         similarity, _, _ = self.model(img_i, img_j)
                     else:
                         similarity, _, _ = self.model(img_i, img_j, mode='similarity')
@@ -266,7 +263,7 @@ class InferencePipeline:
                         image = item['image'].unsqueeze(0).to(self.device)
 
                         # Predict relative pose
-                        if isinstance(self.model, AdvancedMatchingModel):
+                        if self.config.get('model_type', 'basic') == 'advanced':
                             _, rotation, translation = self.model(ref_image, image)
                         else:
                             rotation, translation = self.model(ref_image, image, mode='pose')

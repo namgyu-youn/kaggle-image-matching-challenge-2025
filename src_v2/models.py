@@ -21,10 +21,33 @@ class DINOv2FeatureExtractor(nn.Module):
         )
 
     def forward(self, x):
-        # Extract features from DINOv2
-        features = self.backbone.forward_features(x)
+        # Handle dictionary input
+        if isinstance(x, dict):
+            img1, img2 = x['img1'], x['img2']
 
-        # Global pooling for class token
+            # Process first image
+            features1 = self.backbone.forward_features(img1)
+            class_token1 = features1[:, 0]
+            feat1 = self.projection(class_token1)
+            feat1 = F.normalize(feat1, p=2, dim=1)
+
+            # Process second image
+            features2 = self.backbone.forward_features(img2)
+            class_token2 = features2[:, 0]
+            feat2 = self.projection(class_token2)
+            feat2 = F.normalize(feat2, p=2, dim=1)
+
+            # Compute similarity
+            similarity = torch.sum(feat1 * feat2, dim=1, keepdim=True)
+
+            return {
+                'feat1': feat1,
+                'feat2': feat2,
+                'similarity': similarity
+            }
+
+        # Original single image processing
+        features = self.backbone.forward_features(x)
         class_token = features[:, 0]
 
         # Project to feature space

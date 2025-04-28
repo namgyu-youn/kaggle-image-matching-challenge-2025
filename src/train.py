@@ -23,7 +23,7 @@ def parse_arguments():
                         help='Feature dimension')
 
     # Training parameters
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=8,
                         help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of training epochs')
@@ -51,7 +51,7 @@ def parse_arguments():
                         help='Weight for translation loss')
 
     # Other parameters
-    parser.add_argument('--num_workers', type=int, default=4,
+    parser.add_argument('--num_workers', type=int, default=0,
                         help='Number of data loader workers')
     parser.add_argument('--gradient_clip', type=float, default=1.0,
                         help='Gradient clipping value')

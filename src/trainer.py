@@ -4,7 +4,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from pathlib import Path
 
-from src.models import ImageMatchingModel, AdvancedMatchingModel
+from src.models import ImageMatchingModel
 from src.loss import CombinedLoss
 from src.dataset import get_dataloaders
 
@@ -17,10 +17,7 @@ class Trainer:
         self.device = torch.device(config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
 
         # Model
-        if config.get('model_type', 'basic') == 'advanced':
-            self.model = AdvancedMatchingModel(feature_dim=config.get('feature_dim', 512))
-        else:
-            self.model = ImageMatchingModel(feature_dim=config.get('feature_dim', 512))
+        self.model = ImageMatchingModel(feature_dim=config.get('feature_dim', 512))
 
         self.model = self.model.to(self.device)
 
@@ -130,7 +127,7 @@ class Trainer:
             label = batch['label'].to(self.device)
 
             # Forward pass
-            if isinstance(self.model, AdvancedMatchingModel):
+            if self.config.get('model_type', 'basic') == 'advanced':
                 similarity, rotation, translation = self.model(image1, image2)
                 predictions = {
                     'similarity': similarity,
@@ -206,7 +203,7 @@ class Trainer:
                 label = batch['label'].to(self.device)
 
                 # Forward pass
-                if isinstance(self.model, AdvancedMatchingModel):
+                if self.config.get('model_type', 'basic') == 'advanced':
                     similarity, rotation, translation = self.model(image1, image2)
                     predictions = {
                         'similarity': similarity,
