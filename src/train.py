@@ -1,140 +1,282 @@
 import argparse
-import json
-import os
-from pathlib import Path
 import torch
-# import yaml  # Optional if you want to use YAML configs
+import torchvision.transforms as transforms
+from pathlib import Path
+import logging
+import random
+import numpy as np
+import os
+import json
 
-from src.trainer import Trainer
-
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Train Image Matching Model')
-
-    # Data parameters
-    parser.add_argument('--data_dir', type=str, required=True,
-                        help='Path to the training data directory')
-
-    # Model parameters
-    parser.add_argument('--model_type', type=str, default='advanced',
-                        choices=['basic', 'advanced'],
-                        help='Type of model to use')
-    parser.add_argument('--feature_dim', type=int, default=512,
-                        help='Feature dimension')
-
-    # Training parameters
-    parser.add_argument('--batch_size', type=int, default=8,
-                        help='Batch size for training')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=1e-4,
-                        help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=1e-5,
-                        help='Weight decay')
-    parser.add_argument('--optimizer', type=str, default='adamw',
-                        choices=['adam', 'adamw', 'sgd'],
-                        help='Optimizer to use')
-    parser.add_argument('--scheduler', type=str, default='cosine',
-                        choices=['cosine', 'step', 'plateau'],
-                        help='Learning rate scheduler')
-
-    # Loss weights
-    parser.add_argument('--similarity_weight', type=float, default=1.0,
-                        help='Weight for similarity loss')
-    parser.add_argument('--pose_weight', type=float, default=1.0,
-                        help='Weight for pose estimation loss')
-    parser.add_argument('--contrastive_margin', type=float, default=1.0,
-                        help='Margin for contrastive loss')
-    parser.add_argument('--rotation_weight', type=float, default=1.0,
-                        help='Weight for rotation loss')
-    parser.add_argument('--translation_weight', type=float, default=1.0,
-                        help='Weight for translation loss')
-
-    # Other parameters
-    parser.add_argument('--num_workers', type=int, default=0,
-                        help='Number of data loader workers')
-    parser.add_argument('--gradient_clip', type=float, default=1.0,
-                        help='Gradient clipping value')
-    parser.add_argument('--early_stopping', type=int, default=20,
-                        help='Early stopping patience')
-    parser.add_argument('--save_interval', type=int, default=10,
-                        help='Save checkpoint every N epochs')
-    parser.add_argument('--log_interval', type=int, default=10,
-                        help='Log interval for tensorboard')
-
-    # Paths
-    parser.add_argument('--log_dir', type=str, default='logs',
-                        help='Directory for tensorboard logs')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints',
-                        help='Directory for saving checkpoints')
-    parser.add_argument('--resume', type=str, default=None,
-                        help='Path to checkpoint to resume from')
-
-    # Device
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use for training')
-
-    # Config
-    parser.add_argument('--config', type=str, default=None,
-                        help='Path to config file (YAML or JSON)')
-
-    return parser.parse_args()
+from src.dataset import get_dataloaders
+from src.models import (
+    ImageMatchingModel,
+    DINOv2FeatureExtractor,
+    LoFTRFeatureMatcher,
+    SuperGlueMatchingModule
+)
+from src.trainer import (
+    Trainer
+)
+from src.loss import get_metric_learning_loss, CombinedLoss
+from src.evaluation import evaluate_model
 
 
-def load_config(args):
-    """Load configuration from file if provided"""
-    config = vars(args)
+def set_seed(seed):
+    """Set random seed for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-    if args.config:
-        ext = Path(args.config).suffix.lower()
-        with open(args.config, 'r') as f:
-            if ext == '.yaml' or ext == '.yml':
-                try:
-                    import yaml
-                    file_config = yaml.safe_load(f)
-                except ImportError:
-                    raise ImportError("PyYAML not installed. Please install with 'pip install pyyaml' or use JSON configs.")
-            elif ext == '.json':
-                file_config = json.load(f)
+
+class TrainingPipeline:
+    """Training pipeline for image matching models"""
+
+    def __init__(self, config):
+        """
+        Initialize training pipeline
+
+        Args:
+            config: Dictionary with training configuration
+        """
+        self.config = config
+        self.device = torch.device(config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
+
+        # Set random seed
+        set_seed(config.get('seed', 42))
+
+        # Create directories
+        self.checkpoint_dir = Path(config.get('checkpoint_dir', 'checkpoints'))
+        self.log_dir = Path(config.get('log_dir', 'logs'))
+
+        self.checkpoint_dir.mkdir(exist_ok=True, parents=True)
+        self.log_dir.mkdir(exist_ok=True, parents=True)
+
+        # Setup logging
+        logging.basicConfig(
+            filename=self.log_dir / 'training.log',
+            level=logging.INFO,
+            format='%(asctime)s - %(message)s'
+        )
+        self.logger = logging.getLogger()
+
+        # Create model
+        self.model = self._create_model()
+
+        # Create dataloaders
+        self.train_loader, self.val_loader = self._create_dataloaders()
+
+        # Create loss function
+        self.criterion = self._create_loss()
+
+        # Create trainer
+        self.trainer = Trainer(self.model, self.config)
+
+    def _create_model(self):
+        """Create model based on configuration"""
+        model_type = self.config.get('model_type', 'dino')
+        feature_dim = self.config.get('feature_dim', 512)
+
+        if model_type == 'dino':
+            model = DINOv2FeatureExtractor(feature_dim=feature_dim)
+        elif model_type == 'loftr':
+            model = LoFTRFeatureMatcher()
+        elif model_type == 'superglue':
+            model = SuperGlueMatchingModule()
+        elif model_type == 'advanced':
+            backbone = self.config.get('backbone', 'resnet50')
+            model = ImageMatchingModel(feature_dim=feature_dim, backbone=backbone)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+
+        # Resume from checkpoint if specified
+        if 'resume' in self.config and self.config['resume']:
+            checkpoint_path = self.config['resume']
+            if os.path.exists(checkpoint_path):
+                self.logger.info(f"Resuming from checkpoint: {checkpoint_path}")
+                checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+                # Load model weights
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                elif 'state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['state_dict'])
+                else:
+                    model.load_state_dict(checkpoint)
             else:
-                raise ValueError(f"Unsupported config file format: {ext}")
+                self.logger.warning(f"Checkpoint not found: {checkpoint_path}")
 
-        # Update config with file values
-        config.update(file_config)
+        return model
 
-    return config
+    def _create_dataloaders(self):
+        """Create dataloaders with minimal augmentation"""
+        data_dir = Path(self.config['data_dir'])
+
+        # Basic augmentation
+        transform = transforms.Compose([
+            transforms.RandomResizedCrop((480, 640), scale=(0.8, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                               std=[0.229, 0.224, 0.225])
+        ])
+
+        # Get dataloaders
+        train_loader, val_loader = get_dataloaders(
+            data_dir,
+            batch_size=self.config.get('batch_size', 32),
+            num_workers=self.config.get('num_workers', 4),
+            transform=transform
+        )
+
+        return train_loader, val_loader
+
+    def _create_loss(self):
+        """Create loss function based on configuration"""
+        loss_type = self.config.get('loss_type', 'combined')
+
+        if loss_type == 'metric_learning':
+            # Advanced metric learning loss
+            return get_metric_learning_loss(
+                self.config.get('metric_loss', 'supcon'),
+                temperature=self.config.get('temperature', 0.07)
+            )
+        else:
+            # Default combined loss
+            return CombinedLoss(
+                similarity_weight=self.config.get('similarity_weight', 1.0),
+                pose_weight=self.config.get('pose_weight', 1.0),
+                contrastive_margin=self.config.get('contrastive_margin', 1.0),
+                rotation_weight=self.config.get('rotation_weight', 1.0),
+                translation_weight=self.config.get('translation_weight', 1.0)
+            )
+
+    def train(self):
+        """Train the model"""
+        self.logger.info("Starting training...")
+        self.logger.info(f"Model type: {self.config.get('model_type', 'dino')}")
+        self.logger.info(f"Batch size: {self.config.get('batch_size', 32)}")
+        self.logger.info(f"Learning rate: {self.config.get('learning_rate', 1e-4)}")
+        self.logger.info(f"Epochs: {self.config.get('epochs', 100)}")
+
+        # Train the model
+        self.trainer.train(self.train_loader, self.val_loader, self.criterion)
+
+        # Evaluate the model
+        self.logger.info("Evaluating best model...")
+        best_model_path = self.checkpoint_dir / 'checkpoint_best.pth'
+
+        if os.path.exists(best_model_path):
+            # Load best model
+            checkpoint = torch.load(best_model_path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+
+            # Evaluate
+            metrics = evaluate_model(
+                self.model,
+                self.val_loader,
+                self.device,
+                output_dir=self.log_dir
+            )
+
+            # Log metrics
+            self.logger.info("Evaluation metrics:")
+            for k, v in metrics.items():
+                self.logger.info(f"  {k}: {v}")
+
+        self.logger.info("Training completed!")
+
+        return self.model
+
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Train image matching model')
+
+    # Data arguments
+    parser.add_argument('--data_dir', type=str, required=True, help='Path to dataset directory')
+
+    # Model arguments
+    parser.add_argument('--model_type', type=str, default='dino', choices=['dino', 'loftr', 'superglue', 'advanced'],
+                        help='Type of model to train')
+    parser.add_argument('--feature_dim', type=int, default=512, help='Feature dimension')
+    parser.add_argument('--backbone', type=str, default='resnet50',
+                        choices=['resnet50', 'efficientnet_b3', 'vit_b_16', 'dinov2'],
+                        help='Backbone for feature extraction (for advanced model)')
+
+    # Training arguments
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--weight_decay', type=float, default=1e-4, help='Weight decay')
+    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adam', 'adamw', 'sgd'],
+                        help='Optimizer type')
+    parser.add_argument('--warmup_epochs', type=int, default=5, help='Number of warmup epochs')
+    parser.add_argument('--min_learning_rate', type=float, default=1e-6, help='Minimum learning rate')
+
+    # Loss arguments
+    parser.add_argument('--loss_type', type=str, default='combined', choices=['combined', 'metric_learning'],
+                        help='Type of loss function')
+    parser.add_argument('--metric_loss', type=str, default='supcon',
+                        choices=['arcface', 'circle', 'multi_similarity', 'supcon', 'triplet_hard', 'proxy_nca'],
+                        help='Type of metric learning loss')
+    parser.add_argument('--temperature', type=float, default=0.07, help='Temperature for contrastive losses')
+    parser.add_argument('--similarity_weight', type=float, default=1.0, help='Weight for similarity loss')
+    parser.add_argument('--pose_weight', type=float, default=1.0, help='Weight for pose loss')
+
+    # Advanced training arguments
+    parser.add_argument('--use_mixed_precision', type=str, default='false', choices=['true', 'false'],
+                        help='Use mixed precision training')
+    parser.add_argument('--use_ema', type=str, default='false', choices=['true', 'false'],
+                        help='Use exponential moving average')
+    parser.add_argument('--ema_decay', type=float, default=0.999, help='EMA decay rate')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
+
+    # Output arguments
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Directory to save checkpoints')
+    parser.add_argument('--log_dir', type=str, default='logs', help='Directory to save logs')
+
+    # Resume training
+    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
+
+    args = parser.parse_args()
+
+    # Convert string boolean arguments to actual booleans
+    args.use_mixed_precision = args.use_mixed_precision.lower() == 'true'
+    args.use_ema = args.use_ema.lower() == 'true'
+
+    return args
 
 
 def main():
+    """Main function"""
     # Parse arguments
-    args = parse_arguments()
+    args = parse_args()
 
-    # Load config
-    config = load_config(args)
+    # Convert arguments to dictionary
+    config = vars(args)
 
-    # Set device
-    if config['device'] == 'cuda' and not torch.cuda.is_available():
-        print("CUDA not available, falling back to CPU")
-        config['device'] = 'cpu'
+    # Save configuration
+    log_dir = Path(config['log_dir'])
+    log_dir.mkdir(exist_ok=True, parents=True)
 
-    print("Configuration:")
-    print(json.dumps(config, indent=2))
+    with open(log_dir / 'config.json', 'w') as f:
+        json.dump(config, f, indent=4)
 
-    # Debug: Print current working directory
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Data directory path: {Path(config['data_dir']).absolute()}")
-    print(f"Data directory exists: {Path(config['data_dir']).exists()}")
-    print(f"Train directory exists: {(Path(config['data_dir']) / 'train').exists()}")
+    # Create training pipeline
+    pipeline = TrainingPipeline(config)
 
-    # Create directories
-    Path(config['log_dir']).mkdir(parents=True, exist_ok=True)
-    Path(config['checkpoint_dir']).mkdir(parents=True, exist_ok=True)
+    # Train model
+    model = pipeline.train()
 
-    # Initialize trainer
-    trainer = Trainer(config)
-
-    # Start training
-    trainer.train()
+    return model
 
 
 if __name__ == '__main__':

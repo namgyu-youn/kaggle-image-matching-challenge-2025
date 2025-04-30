@@ -6,15 +6,12 @@ from .models import (
     SimilarityNetwork,
     PoseEstimator,
     ImageMatchingModel,
-    SuperPointDetector,
 )
 from .loss import (
     ContrastiveLoss,
     TripletLoss,
     PoseLoss,
     CombinedLoss,
-    MetricLearningLoss,
-    GeometricConsistencyLoss,
 )
 from .trainer import Trainer
 from .inference import InferencePipeline
@@ -29,13 +26,10 @@ __all__ = [
     "SimilarityNetwork",
     "PoseEstimator",
     "ImageMatchingModel",
-    "SuperPointDetector",
     "ContrastiveLoss",
     "TripletLoss",
     "PoseLoss",
     "CombinedLoss",
-    "MetricLearningLoss",
-    "GeometricConsistencyLoss",
     "Trainer",
     "InferencePipeline",
 ]

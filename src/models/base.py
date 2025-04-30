@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-import math
+
 
 class FeatureExtractor(nn.Module):
     """Feature extractor based on pre-trained CNN backbone"""
@@ -216,40 +216,39 @@ class ImageMatchingModel(nn.Module):
         # Optional: Share weights between feature extractors
         # self.pose_estimator.feature_extractor = self.similarity_net.feature_extractor
 
-    def forward(self, x1, x2, mode='similarity'):
-        """Forward pass based on mode"""
-        if mode == 'similarity':
-            return self.similarity_net(x1, x2)
-        elif mode == 'pose':
-            return self.pose_estimator(x1, x2)
-        else:
-            # Both
-            similarity, feat1, feat2 = self.similarity_net(x1, x2)
-            rotation, translation, confidence = self.pose_estimator(x1, x2)
-            return similarity, rotation, translation, confidence
-
-
-class PositionalEncoding(nn.Module):
-    """Sinusoidal positional encoding for transformer-based models"""
-    def __init__(self, d_model, max_len=5000):
-        super().__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
-
     def forward(self, x):
-        return x + self.pe[:x.size(0), :]
+        """Forward pass based on mode"""
+        # Handle dictionary input
+        if isinstance(x, dict):
+            if 'image1' in x and 'image2' in x:
+                x1, x2 = x['image1'], x['image2']
+            elif 'img1' in x and 'img2' in x:
+                x1, x2 = x['img1'], x['img2']
+            else:
+                raise KeyError(f"Required image keys not found in input dictionary. Available keys: {list(x.keys())}")
 
+            # Get similarity
+            similarity, feat1, feat2 = self.similarity_net(x1, x2)
 
-class SuperPointDetector(nn.Module):
-    """SuperPoint-style keypoint detector with improved architecture"""
-
-    def __init__(self, num_keypoints=512):
-        super().__init__()
-
-        # Encoder with residual connections
-        self.conv1a = nn.Conv2d(3, 6)
+            # Get pose if needed
+            if x.get('mode') == 'pose' or x.get('mode') == 'full':
+                rotation, translation, confidence = self.pose_estimator(x1, x2)
+                return {
+                    'similarity': similarity,
+                    'feat1': feat1,
+                    'feat2': feat2,
+                    'rotation': rotation,
+                    'translation': translation,
+                    'confidence': confidence
+                }
+            else:
+                return {
+                    'similarity': similarity,
+                    'feat1': feat1,
+                    'feat2': feat2
+                }
+        else:
+            # Legacy support for direct input
+            x1, x2 = x
+            similarity, feat1, feat2 = self.similarity_net(x1, x2)
+            return similarity, feat1, feat2
