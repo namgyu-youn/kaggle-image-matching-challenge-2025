@@ -1,0 +1,98 @@
+# Image Matching Challenge 2025 - Model Configuration
+# This file contains performance-related parameters only
+
+#------------------------------------------------------------------------------
+# Model Architecture Configuration
+#------------------------------------------------------------------------------
+model:
+  # Available types: dino, loftr, superglue, advanced
+  type: advanced
+
+  # Feature dimension for embedding space
+  feature_dim: 768
+
+  # Backbone architecture (used with 'advanced' model type)
+  # Options: resnet50, efficientnet_b3, vit_b_16, dinov2
+  backbone: dinov2
+
+#------------------------------------------------------------------------------
+# Training Parameters
+#------------------------------------------------------------------------------
+training:
+  # Batch size - controls memory usage and training stability
+  # Note: Values < 2 may cause BatchNorm issues
+  batch_size: 2
+
+  # Number of complete passes through the training dataset
+  epochs: 100
+
+  # Base learning rate for optimization
+  learning_rate: 3.0e-4
+
+  # Weight decay regularization factor
+  weight_decay: 5.0e-5
+
+  # Optimizer selection
+  # Options: adam, adamw, sgd
+  optimizer: adamw
+
+  # Warmup epochs for learning rate scheduler
+  warmup_epochs: 5
+
+  # Minimum learning rate (for cosine annealing)
+  min_learning_rate: 5.0e-7
+
+  # Number of worker processes for data loading
+  # Recommendation: 2-4 for most systems, reduce if OOM errors occur
+  num_workers: 4
+
+  # Random seed for reproducibility
+  seed: 42
+
+#------------------------------------------------------------------------------
+# Loss Function Configuration
+#------------------------------------------------------------------------------
+loss:
+  # Primary loss function type
+  # Options: combined, metric_learning
+  type: combined
+
+  # Metric learning loss variant (when type = metric_learning)
+  # Options: arcface, circle, multi_similarity, supcon, triplet_hard, proxy_nca
+  metric_loss: supcon
+
+  # Temperature parameter for contrastive losses
+  # Controls the sharpness of similarity distribution
+  temperature: 0.07
+
+  # Weight for similarity loss component
+  similarity_weight: 1.5
+
+  # Weight for pose estimation loss component
+  pose_weight: 0.5
+
+  # Note: contrastive_margin is used internally by the CombinedLoss class
+  # but is not accepted as a command-line argument, so it's commented out here
+  # contrastive_margin: 1.0
+
+#------------------------------------------------------------------------------
+# Advanced Training Options
+#------------------------------------------------------------------------------
+advanced:
+  # Use mixed precision training (FP16)
+  # Speeds up training with minimal accuracy impact
+  use_mixed_precision: true
+
+  # Use Exponential Moving Average of model weights
+  # Improves stability and generalization
+  use_ema: true
+
+  # EMA decay rate (higher = slower updating)
+  # Recommended range: 0.99 to 0.9999
+  ema_decay: 0.9997
+
+  # Early stopping patience (epochs without improvement)
+  early_stopping_patience: 10
+
+  # Checkpoint saving frequency (epochs)
+  save_every_n_epochs: 5

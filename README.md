@@ -1,7 +1,11 @@
+# Kaggle : Image Matching Challenge 2025
+
 ## Overview ([URL](https://www.kaggle.com/competitions/image-matching-challenge-2025))
+
 You'll develop machine learning algorithms that can figure out which images belong together and use them to reconstruct accurate 3D scenes. This innovation advances the field of computer vision and enables new applications in augmented reality, robotics, and AI.
 
 ## Description
+
 Note: This is the third Image Matching Challenge. It builds on 2024's Image Matching Challenge. This year, we’re taking it a step further and challenging you to determine how images should be grouped together or discarded, in addition to reconstructing 3D scenes.
 
 Imagine sitting down to solve a jigsaw puzzle. But when you open the box, you discover that your pieces have been jumbled together with more pieces from other puzzle sets! How do you determine which pieces are for your puzzle and which belong to other sets?
@@ -15,6 +19,7 @@ This competition challenges you to identify which images should be grouped and w
 Your work could make crowdsourced images more useful for large-scale reconstructions, benefiting areas like urban planning and scientific research.
 
 ## Evaluation
+
 The ground-truth data consists of multiple datasets `D_k`. Each contains one or more scenes `S_ki` with images `I_kiz`. The different scenes belonging to one dataset do not overlap: they show different regions or objects, but are similar in appearance, like two sides of the same building, or two different trees. Each dataset may have a different number of scenes and images. Each dataset may or may not contain "outlier" images, which do not correspond to any scene.
 
 For training data, we provide the camera pose of each image in terms of its rotation matrix R
@@ -37,10 +42,11 @@ And analogously for the mAA score.
 
 The combined score `S_k` is the harmonic mean of the mAA and clustering scores. In this formulation, the mAA score is roughly equivalent to recall, and the clustering score to precision, and the final score is thus analogous to the standard F1 score. Finally, we average the results over the different datasets to obtain a single score.
 
-
 ## Submission file
+
 For each image ID in the test set, you must predict a scene assignment and a pose. The file should contain a header and have the following format:
-```
+
+```bash
 dataset,scene,image,rotation_matrix,translation_vector
 dataset1,cluster1,image1.png,0.1;0.2;0.3;0.4;0.5;0.6;0.7;0.8;0.9,0.1;0.2;0.3
 dataset1,cluster1,image2.png,0.1;0.2;0.3;0.4;0.5;0.6;0.7;0.8;0.9,0.1;0.2;0.3
@@ -49,6 +55,7 @@ dataset1,cluster2,image4.png,0.1;0.2;0.3;0.4;0.5;0.6;0.7;0.8;0.9,0.1;0.2;0.3
 dataset1,outliers,image5.png,nan;nan;nan;nan;nan;nan;nan;nan;nan,nan;nan;nan
 dataset2,cluster1,image1.png,0.1;0.2;0.3;0.4;0.5;0.6;0.7;0.8;0.9,0.1;0.2;0.3
 ```
+
 The scene labels are assigned by you. They are only used to specify which images belong together, so they can contain arbitrary strings: we recommend using something simple, like `cluster1`, `cluster2`, etc. The exception is an outliers label, which should be assigned to images that cannot be registered to any other image.
 
 The example above contains dataset1 with five images. The solution indicates that images 1 and 2 belong together, as do images 3 and 4. Image 5 does not, so it is assigned to outliers. Images that you think are outliers are not registered to other images, so the rotation matrix and translation vector are not used: we make this clear using nan for every value.
@@ -56,8 +63,22 @@ The example above contains dataset1 with five images. The solution indicates tha
 The `rotation_matrix` (a 3x3 matrix) and `translation_vector` (a 3-D vector) are written as `;`-separated vectors. Matrices are flattened into vectors in row-major order. Note that this metric does not require camera intrinsics, i.e., the calibration matrix `K`) that is usually estimated along with `R` and `T` during the 3D reconstruction process.
 
 Note that you can group images together if you think they belong to the same scene, even if you cannot register them. You can indicate this by using the right scene label and nan values for rotation_matrix and translation_vector. For example:
-```
+
+```bash
 dataset2,cluster1,image2.png,nan;nan;nan;nan;nan;nan;nan;nan;nan,nan;nan;nan
 ```
 
 Notice that we can re-use scene labels (such as `cluster1`) for different datasets.
+
+## Usage
+
+```bash
+chmod +x setup_dataset.sh
+chmod +x train.sh
+
+# Build dataset
+./setup_dataset.sh
+
+# Train the model
+./train.sh --data_dir ./dataset/train
+```

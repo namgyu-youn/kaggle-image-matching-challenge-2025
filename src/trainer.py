@@ -1,8 +1,8 @@
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
 import numpy as np
-import torch.nn.functional as F
 from pathlib import Path
 import logging
 from tqdm import tqdm
@@ -37,28 +37,7 @@ class MixedPrecisionTrainer:
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
-        return loss.item()
-
-    def validate(self, val_loader, criterion):
-        """Validate the model"""
-        self.model.eval()
-        val_loss = 0.0
-
-        with torch.no_grad():
-            for batch in val_loader:
-                # Move batch to device
-                for k, v in batch.items():
-                    if isinstance(v, torch.Tensor):
-                        batch[k] = v.to(self.device)
-
-                # Forward pass
-                with autocast():
-                    outputs = self.model(batch)
-                    loss = criterion(outputs, batch)
-
-                val_loss += loss.item()
-
-        return val_loss / len(val_loader)
+        return loss.item(), outputs
 
 
 class HardNegativeMining:
@@ -300,6 +279,7 @@ class Trainer:
 
         # Initialize best metrics
         self.best_val_loss = float('inf')
+        self.best_val_accuracy = 0.0  # Added accuracy tracking
         self.best_epoch = 0
 
         # Setup logger
@@ -309,6 +289,69 @@ class Trainer:
             format='%(asctime)s - %(message)s'
         )
         self.logger = logging.getLogger()
+
+    def calculate_accuracy(self, outputs, batch):
+        """
+        Calculate accuracy based on model outputs and batch data
+
+        Args:
+            outputs: Model outputs (could be features, matches, etc.)
+            batch: Batch data containing targets
+
+        Returns:
+            float: Accuracy value
+        """
+        # Implementation depends on the specific model and task
+        # Here's a generic implementation that should be adapted to your specific needs
+
+        # If outputs is a tuple, use the first element (typically class scores or features)
+        if isinstance(outputs, tuple):
+            outputs = outputs[0]
+
+        # Extract targets from batch based on available keys
+        if 'labels' in batch:
+            targets = batch['labels']
+        elif 'target_indices' in batch:
+            targets = batch['target_indices']
+        elif 'matches' in batch:
+            targets = batch['matches']
+        elif 'correspondences' in batch:
+            targets = batch['correspondences']
+        else:
+            # If no appropriate target is found, return 0.0
+            return 0.0
+
+        # For feature matching (feature vectors, dim=2)
+        if outputs.dim() == 2:
+            # Normalize feature vectors
+            outputs = F.normalize(outputs, p=2, dim=1)
+            # Compute similarity matrix
+            sim_matrix = torch.matmul(outputs, outputs.t())
+            # Exclude self-similarity (set diagonal to very low value)
+            sim_matrix.fill_diagonal_(-10000.0)
+            # Find most similar items
+            _, pred_indices = sim_matrix.topk(1, dim=1)
+            pred_indices = pred_indices.squeeze()
+
+            # If targets are class indices
+            if targets.dim() == 1:
+                correct = (pred_indices == targets).sum().item()
+                return correct / targets.size(0)
+            # If targets are matching matrices
+            else:
+                # Simple example: use row-wise max as target indices
+                _, target_indices = targets.max(dim=1)
+                correct = (pred_indices == target_indices).sum().item()
+                return correct / targets.size(0)
+
+        # For classification problems
+        elif outputs.dim() > 2:
+            _, predicted = torch.max(outputs, 1)
+            correct = (predicted == targets).sum().item()
+            return correct / targets.size(0)
+
+        # Default fallback
+        return 0.0
 
     def train(self, train_loader, val_loader, criterion):
         """
@@ -325,6 +368,8 @@ class Trainer:
             # Training phase
             self.model.train()
             train_loss = 0.0
+            train_accuracy = 0.0  # Added accuracy tracking
+            batch_count = 0
 
             progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
             for batch in progress_bar:
@@ -335,7 +380,7 @@ class Trainer:
 
                 # Training step
                 if self.use_mixed_precision:
-                    loss = self.trainer.train_step(batch, criterion)
+                    loss, outputs = self.trainer.train_step(batch, criterion)
                 else:
                     # Standard training
                     self.optimizer.zero_grad()
@@ -346,19 +391,28 @@ class Trainer:
                     self.optimizer.step()
                     loss = loss.item()
 
+                # Calculate accuracy
+                with torch.no_grad():
+                    accuracy = self.calculate_accuracy(outputs, batch)
+
                 train_loss += loss
-                progress_bar.set_postfix({'loss': loss})
+                train_accuracy += accuracy
+                batch_count += 1
+                progress_bar.set_postfix({'loss': loss, 'acc': accuracy})
 
                 # Update EMA model
                 if self.use_ema:
                     self.ema.update()
 
-            # Calculate average training loss
+            # Calculate average training metrics
             train_loss /= len(train_loader)
+            train_accuracy /= batch_count
 
             # Validation phase
             self.model.eval()
             val_loss = 0.0
+            val_accuracy = 0.0  # Added accuracy tracking
+            val_batch_count = 0
 
             # Apply EMA for validation
             if self.use_ema:
@@ -374,29 +428,39 @@ class Trainer:
                     # Forward pass
                     outputs = self.model(batch)
                     loss = criterion(outputs, batch)
+                    accuracy = self.calculate_accuracy(outputs, batch)
+
                     val_loss += loss.item()
+                    val_accuracy += accuracy
+                    val_batch_count += 1
 
             # Restore original model
             if self.use_ema:
                 self.ema.restore()
 
-            # Calculate average validation loss
+            # Calculate average validation metrics
             val_loss /= len(val_loader)
+            val_accuracy /= val_batch_count
 
             # Update learning rate
             self.scheduler.step()
 
-            # Log metrics
-            self.logger.info(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            # Log metrics with accuracy
+            self.logger.info(
+                f"Epoch {epoch+1}/{num_epochs} - "
+                f"Train Loss: {train_loss:.4f}, Train Acc: {train_accuracy:.4f}, "
+                f"Val Loss: {val_loss:.4f}, Val Acc: {val_accuracy:.4f}"
+            )
 
             # Save checkpoint
-            self._save_checkpoint(epoch, val_loss)
+            self._save_checkpoint(epoch, val_loss, val_accuracy)
 
-            # Early stopping
+            # Early stopping (now using accuracy as well)
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
+                self.best_val_accuracy = val_accuracy
                 self.best_epoch = epoch
-                self._save_checkpoint(epoch, val_loss, is_best=True)
+                self._save_checkpoint(epoch, val_loss, val_accuracy, is_best=True)
 
             # Check for early stopping
             patience = self.config.get('patience', 10)
@@ -404,13 +468,22 @@ class Trainer:
                 self.logger.info(f"Early stopping at epoch {epoch+1}")
                 break
 
-    def _save_checkpoint(self, epoch, val_loss, is_best=False):
-        """Save model checkpoint"""
+    def _save_checkpoint(self, epoch, val_loss, val_accuracy, is_best=False):
+        """
+        Save model checkpoint
+
+        Args:
+            epoch: Current epoch
+            val_loss: Validation loss
+            val_accuracy: Validation accuracy
+            is_best: Whether this is the best model so far
+        """
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'val_loss': val_loss,
+            'val_accuracy': val_accuracy,  # Added accuracy to checkpoint
             'config': self.config
         }
 
@@ -420,14 +493,23 @@ class Trainer:
         # Save best checkpoint
         if is_best:
             torch.save(checkpoint, self.checkpoint_dir / 'checkpoint_best.pth')
-            self.logger.info(f"Saved best model checkpoint with val_loss: {val_loss:.4f}")
+            self.logger.info(f"Saved best model checkpoint with val_loss: {val_loss:.4f}, val_accuracy: {val_accuracy:.4f}")
 
     def load_checkpoint(self, checkpoint_path):
-        """Load model from checkpoint"""
+        """
+        Load model from checkpoint
+
+        Args:
+            checkpoint_path: Path to checkpoint file
+
+        Returns:
+            int: Epoch number from checkpoint
+        """
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.best_val_loss = checkpoint.get('val_loss', float('inf'))
+        self.best_val_accuracy = checkpoint.get('val_accuracy', 0.0)  # Load accuracy from checkpoint
         self.best_epoch = checkpoint.get('epoch', 0)
 
         self.logger.info(f"Loaded checkpoint from {checkpoint_path}")
