@@ -21,7 +21,7 @@ model:
 training:
   # Batch size - controls memory usage and training stability
   # Note: Values < 2 may cause BatchNorm issues
-  batch_size: 2
+  batch_size: 4
 
   # Number of complete passes through the training dataset
   epochs: 100
@@ -41,10 +41,6 @@ training:
 
   # Minimum learning rate (for cosine annealing)
   min_learning_rate: 5.0e-7
-
-  # Number of worker processes for data loading
-  # Recommendation: 2-4 for most systems, reduce if OOM errors occur
-  num_workers: 4
 
   # Random seed for reproducibility
   seed: 42
@@ -71,9 +67,14 @@ loss:
   # Weight for pose estimation loss component
   pose_weight: 0.5
 
-  # Note: contrastive_margin is used internally by the CombinedLoss class
-  # but is not accepted as a command-line argument, so it's commented out here
-  # contrastive_margin: 1.0
+  # Margin for contrastive loss
+  contrastive_margin: 1.0
+
+  # Weight for rotation component in pose loss
+  rotation_weight: 1.0
+
+  # Weight for translation component in pose loss
+  translation_weight: 1.0
 
 #------------------------------------------------------------------------------
 # Advanced Training Options
