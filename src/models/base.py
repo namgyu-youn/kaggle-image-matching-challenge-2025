@@ -62,7 +62,25 @@ class FeatureExtractor(nn.Module):
         if self.backbone == 'dinov2':
             # DINOv2 specific forward pass
             feat = self.features(x)
-            x = feat['x_norm_patchtokens']  # Use patch tokens, not CLS token
+            # Check if feat is a dictionary or tensor
+            if isinstance(feat, dict):
+                if 'x_norm_patchtokens' in feat:
+                    x = feat['x_norm_patchtokens'].mean(dim=1)  # Use patch tokens, global pooling
+                elif 'x_norm_clstoken' in feat:
+                    x = feat['x_norm_clstoken']  # Use CLS token
+                else:
+                    # Fallback to first available feature
+                    x = next(iter(feat.values()))
+                    if len(x.shape) > 2:
+                        x = x.mean(dim=1)  # Apply global pooling if needed
+            else:
+                # Handle case when feat is a tensor (not a dictionary)
+                if len(feat.shape) == 4:  # [B, C, H, W]
+                    x = feat.mean(dim=(2, 3))  # Global average pooling
+                elif len(feat.shape) == 3:  # [B, L, C]
+                    x = feat.mean(dim=1)  # Average across sequence length
+                else:
+                    x = feat  # Already in expected format
             x = x.mean(dim=1)  # Global pool
         elif self.backbone.startswith('vit'):
             # Vision Transformer

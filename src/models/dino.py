@@ -52,14 +52,46 @@ class DINOv2FeatureExtractor(nn.Module):
 
             # Process first image
             features1 = self.backbone.forward_features(img1)
-            class_token1 = features1[:, 0]
-            feat1 = self.projection(class_token1)
+
+            # DINOv2 returns a dict - extracting the correct feature
+            if isinstance(features1, dict):
+                if 'x_norm_clstoken' in features1:
+                    # Use CLS token if available
+                    feat1_token = features1['x_norm_clstoken']
+                elif 'x_norm_patchtokens' in features1:
+                    # Use average of patch tokens if CLS token not available
+                    feat1_token = features1['x_norm_patchtokens'].mean(dim=1)
+                else:
+                    # Fallback to first available feature
+                    feat1_token = list(features1.values())[0]
+                    if len(feat1_token.shape) > 2:
+                        feat1_token = feat1_token.mean(dim=1)
+            else:
+                # If not a dict, assume it's the traditional transformer output with CLS token
+                feat1_token = features1[:, 0] if features1.ndim > 2 else features1
+
+            # Project features
+            feat1 = self.projection(feat1_token)
             feat1 = F.normalize(feat1, p=2, dim=1)
 
             # Process second image
             features2 = self.backbone.forward_features(img2)
-            class_token2 = features2[:, 0]
-            feat2 = self.projection(class_token2)
+
+            # Extract features from second image using same approach
+            if isinstance(features2, dict):
+                if 'x_norm_clstoken' in features2:
+                    feat2_token = features2['x_norm_clstoken']
+                elif 'x_norm_patchtokens' in features2:
+                    feat2_token = features2['x_norm_patchtokens'].mean(dim=1)
+                else:
+                    feat2_token = list(features2.values())[0]
+                    if len(feat2_token.shape) > 2:
+                        feat2_token = feat2_token.mean(dim=1)
+            else:
+                feat2_token = features2[:, 0] if features2.ndim > 2 else features2
+
+            # Project features
+            feat2 = self.projection(feat2_token)
             feat2 = F.normalize(feat2, p=2, dim=1)
 
             # Compute similarity
@@ -74,10 +106,22 @@ class DINOv2FeatureExtractor(nn.Module):
         # Single image processing
         x = self._resize_if_needed(x)
         features = self.backbone.forward_features(x)
-        class_token = features[:, 0]
+
+        # Extract features using the same approach as above
+        if isinstance(features, dict):
+            if 'x_norm_clstoken' in features:
+                token = features['x_norm_clstoken']
+            elif 'x_norm_patchtokens' in features:
+                token = features['x_norm_patchtokens'].mean(dim=1)
+            else:
+                token = list(features.values())[0]
+                if len(token.shape) > 2:
+                    token = token.mean(dim=1)
+        else:
+            token = features[:, 0] if features.ndim > 2 else features
 
         # Project to feature space
-        projected = self.projection(class_token)
+        projected = self.projection(token)
         projected = F.normalize(projected, p=2, dim=1)
 
         return projected

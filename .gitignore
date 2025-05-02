@@ -1,4 +1,8 @@
 data/
+dataset/
+checkpoints/
+*.pth
+*.zip
 
 logs/
 .venv
