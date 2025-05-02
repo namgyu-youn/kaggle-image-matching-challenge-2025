@@ -1,7 +1,7 @@
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 import numpy as np
 from pathlib import Path
 import logging
@@ -11,7 +11,7 @@ from tqdm import tqdm
 class MixedPrecisionTrainer:
     """Trainer with mixed precision training for faster computation"""
 
-    def __init__(self, model, optimizer, device='cuda'):
+    def __init__(self, model, optimizer, device="cuda" if torch.cuda.is_available() else "cpu"):
         self.model = model
         self.optimizer = optimizer
         self.device = device
@@ -21,7 +21,7 @@ class MixedPrecisionTrainer:
         self.model.train()
 
         # Mixed precision training
-        with autocast():
+        with autocast(device_type=str(self.device)):
             outputs = self.model(batch)
             loss = criterion(outputs, batch)
 

@@ -1,4 +1,3 @@
-import argparse
 import torch
 import torchvision.transforms as transforms
 from pathlib import Path
@@ -7,6 +6,8 @@ import random
 import numpy as np
 import os
 import json
+import argparse
+import yaml
 
 from src.dataset import get_dataloaders
 from src.models import (
@@ -196,72 +197,79 @@ class TrainingPipeline:
 
 
 def parse_args():
-    """Parse command line arguments"""
+    """Parse command line arguments for non-performance-related parameters only"""
     parser = argparse.ArgumentParser(description='Train image matching model')
 
-    # Data arguments
+    # Non-performance-related arguments
     parser.add_argument('--data_dir', type=str, required=True, help='Path to dataset directory')
-
-    # Model arguments
-    parser.add_argument('--model_type', type=str, default='dino', choices=['dino', 'loftr', 'superglue', 'advanced'],
-                        help='Type of model to train')
-    parser.add_argument('--feature_dim', type=int, default=512, help='Feature dimension')
-    parser.add_argument('--backbone', type=str, default='resnet50',
-                        choices=['resnet50', 'efficientnet_b3', 'vit_b_16', 'dinov2'],
-                        help='Backbone for feature extraction (for advanced model)')
-
-    # Training arguments
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=1e-4, help='Weight decay')
-    parser.add_argument('--optimizer', type=str, default='adamw', choices=['adam', 'adamw', 'sgd'],
-                        help='Optimizer type')
-    parser.add_argument('--warmup_epochs', type=int, default=5, help='Number of warmup epochs')
-    parser.add_argument('--min_learning_rate', type=float, default=1e-6, help='Minimum learning rate')
-
-    # Loss arguments
-    parser.add_argument('--loss_type', type=str, default='combined', choices=['combined', 'metric_learning'],
-                        help='Type of loss function')
-    parser.add_argument('--metric_loss', type=str, default='supcon',
-                        choices=['arcface', 'circle', 'multi_similarity', 'supcon', 'triplet_hard', 'proxy_nca'],
-                        help='Type of metric learning loss')
-    parser.add_argument('--temperature', type=float, default=0.07, help='Temperature for contrastive losses')
-    parser.add_argument('--similarity_weight', type=float, default=1.0, help='Weight for similarity loss')
-    parser.add_argument('--pose_weight', type=float, default=1.0, help='Weight for pose loss')
-
-    # Advanced training arguments
-    parser.add_argument('--use_mixed_precision', type=str, default='false', choices=['true', 'false'],
-                        help='Use mixed precision training')
-    parser.add_argument('--use_ema', type=str, default='false', choices=['true', 'false'],
-                        help='Use exponential moving average')
-    parser.add_argument('--ema_decay', type=float, default=0.999, help='EMA decay rate')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
-
-    # Output arguments
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Directory to save checkpoints')
     parser.add_argument('--log_dir', type=str, default='logs', help='Directory to save logs')
-
-    # Resume training
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
     parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
 
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    # Convert string boolean arguments to actual booleans
-    args.use_mixed_precision = args.use_mixed_precision.lower() == 'true'
-    args.use_ema = args.use_ema.lower() == 'true'
 
-    return args
+def load_config():
+    """Load configuration from config.yml file"""
+    config_path = Path('config.yml')
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Convert nested dictionary to flat dictionary
+    flat_config = {}
+
+    # Model parameters
+    flat_config['model_type'] = config['model']['type']  # Map 'type' to 'model_type'
+    flat_config['feature_dim'] = config['model']['feature_dim']
+    flat_config['backbone'] = config['model']['backbone']
+
+    # Training parameters
+    flat_config['batch_size'] = config['training']['batch_size']
+    flat_config['epochs'] = config['training']['epochs']
+    flat_config['learning_rate'] = config['training']['learning_rate']
+    flat_config['weight_decay'] = config['training']['weight_decay']
+    flat_config['optimizer'] = config['training']['optimizer']
+    flat_config['warmup_epochs'] = config['training']['warmup_epochs']
+    flat_config['min_learning_rate'] = config['training']['min_learning_rate']
+    flat_config['seed'] = config['training']['seed']
+
+    # Loss parameters
+    flat_config['loss_type'] = config['loss']['type']
+    flat_config['metric_loss'] = config['loss']['metric_loss']
+    flat_config['temperature'] = config['loss']['temperature']
+    flat_config['similarity_weight'] = config['loss']['similarity_weight']
+    flat_config['pose_weight'] = config['loss']['pose_weight']
+    flat_config['contrastive_margin'] = config['loss']['contrastive_margin']
+    flat_config['rotation_weight'] = config['loss']['rotation_weight']
+    flat_config['translation_weight'] = config['loss']['translation_weight']
+
+    # Advanced parameters
+    flat_config['use_mixed_precision'] = config['advanced']['use_mixed_precision']
+    flat_config['use_ema'] = config['advanced']['use_ema']
+    flat_config['ema_decay'] = config['advanced']['ema_decay']
+
+    return flat_config
 
 
 def main():
     """Main function"""
-    # Parse arguments
+    # Parse command line arguments for non-performance-related parameters
     args = parse_args()
 
-    # Convert arguments to dictionary
-    config = vars(args)
+    # Load performance-related parameters from config.yml
+    config = load_config()
+
+    # Add non-performance-related parameters from command line
+    config['data_dir'] = args.data_dir
+    config['checkpoint_dir'] = args.checkpoint_dir
+    config['log_dir'] = args.log_dir
+    config['num_workers'] = args.num_workers
+    config['resume'] = args.resume
 
     # Save configuration
     log_dir = Path(config['log_dir'])
