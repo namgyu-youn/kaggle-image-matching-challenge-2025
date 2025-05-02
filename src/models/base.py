@@ -81,7 +81,6 @@ class FeatureExtractor(nn.Module):
                     x = feat.mean(dim=1)  # Average across sequence length
                 else:
                     x = feat  # Already in expected format
-            x = x.mean(dim=1)  # Global pool
         elif self.backbone.startswith('vit'):
             # Vision Transformer
             x = self.features.conv_proj(x)
