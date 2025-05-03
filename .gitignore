@@ -3,7 +3,12 @@ dataset/
 checkpoints/
 *.pth
 *.zip
+*.csv
 
 logs/
 .venv
 *.egg-info
+
+*.json
+*.pyc
+*.lock

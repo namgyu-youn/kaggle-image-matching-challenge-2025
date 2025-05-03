@@ -104,7 +104,7 @@ class CombinedLoss(nn.Module):
         self.similarity_weight = similarity_weight
         self.pose_weight = pose_weight
 
-        self.similarity_criterion = nn.BCELoss()
+        self.similarity_criterion = nn.BCEWithLogitsLoss()
         self.contrastive_loss = ContrastiveLoss(margin=contrastive_margin)
         self.pose_loss = PoseLoss(rotation_weight=rotation_weight,
                                  translation_weight=translation_weight)

@@ -9,11 +9,14 @@ model:
   type: advanced
 
   # Feature dimension for embedding space
-  feature_dim: 768
+  feature_dim: 4096
 
   # Backbone architecture (used with 'advanced' model type)
   # Options: resnet50, efficientnet_b3, vit_b_16, dinov2
   backbone: dinov2
+
+  num_layers: 12
+  multi_scale: true
 
 #------------------------------------------------------------------------------
 # Training Parameters
@@ -21,29 +24,34 @@ model:
 training:
   # Batch size - controls memory usage and training stability
   # Note: Values < 2 may cause BatchNorm issues
-  batch_size: 4
+  batch_size: 8
 
   # Number of complete passes through the training dataset
-  epochs: 100
+  epochs: 200
 
   # Base learning rate for optimization
-  learning_rate: 3.0e-4
+  learning_rate: 3.0e-5
 
   # Weight decay regularization factor
-  weight_decay: 5.0e-5
+  weight_decay: 3.0e-5
 
   # Optimizer selection
   # Options: adam, adamw, sgd
   optimizer: adamw
 
   # Warmup epochs for learning rate scheduler
-  warmup_epochs: 5
+  warmup_epochs: 10
 
   # Minimum learning rate (for cosine annealing)
-  min_learning_rate: 5.0e-7
+  min_learning_rate: 1.0e-7
 
   # Random seed for reproducibility
   seed: 42
+
+  # Prevent OOM maximizing GPU usage
+  gradient_accumulation_steps: 4
+  gradient_clip_val: 1.0
+  sync_batchnorm: true
 
 #------------------------------------------------------------------------------
 # Loss Function Configuration
@@ -90,10 +98,16 @@ advanced:
 
   # EMA decay rate (higher = slower updating)
   # Recommended range: 0.99 to 0.9999
-  ema_decay: 0.9997
+  ema_decay: 0.9999
 
   # Early stopping patience (epochs without improvement)
   early_stopping_patience: 10
 
   # Checkpoint saving frequency (epochs)
   save_every_n_epochs: 5
+  activation_checkpointing: true
+
+  # Safety device for preventing OOM
+  gradient_checkpointing: true
+  cudnn_benchmark: false
+  deterministic: true
