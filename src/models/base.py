@@ -247,7 +247,7 @@ class ImageMatchingModel(nn.Module):
 
         self.multi_scale = multi_scale
 
-        # 기본 네트워크 구성
+        # Base Network similarity
         self.similarity_net = SimilarityNetwork(
             feature_dim=feature_dim,
             attention_heads=attention_heads
@@ -281,38 +281,36 @@ class ImageMatchingModel(nn.Module):
             elif 'img1' in x and 'img2' in x:
                 x1, x2 = x['img1'], x['img2']
             else:
-                raise KeyError(f"Required image keys not found in input dictionary")
+                raise KeyError("Required image keys not found in input dictionary")
 
             # Get similarity using multi scaling
             if self.multi_scale:
-                # 원본 크기 특성
+                # Original feature's size
                 feat1_orig = self.similarity_net.feature_extractor(x1)
                 feat2_orig = self.similarity_net.feature_extractor(x2)
 
-                # 다운샘플링된 특성
+                # Down-sampled features
                 x1_down = F.interpolate(x1, scale_factor=0.5, mode='bilinear')
                 x2_down = F.interpolate(x2, scale_factor=0.5, mode='bilinear')
                 feat1_down = self.similarity_net.feature_extractor(x1_down)
                 feat2_down = self.similarity_net.feature_extractor(x2_down)
 
-                # 업샘플링된 특성
+                # Upsampled features
                 if feat1_down.dim() > 2:
                     feat1_down = F.adaptive_avg_pool2d(feat1_down, 1).squeeze(-1).squeeze(-1)
                     feat2_down = F.adaptive_avg_pool2d(feat2_down, 1).squeeze(-1).squeeze(-1)
 
-                # 특성 융합 (가중치 학습)
+                # Feature combination (Gradient Learning)
                 weights = F.softmax(self.scale_weights, dim=0)
                 feat1 = weights[0] * feat1_orig + weights[1] * feat1_down
                 feat2 = weights[0] * feat2_orig + weights[1] * feat2_down
 
-                # 어텐션 적용
+                # Apply cross attention
                 if hasattr(self.similarity_net, 'cross_attention'):
-                    # 차원 조정 (필요시)
                     if feat1.dim() == 2:
                         feat1_attn = feat1.unsqueeze(1)  # [B, 1, F]
                         feat2_attn = feat2.unsqueeze(1)  # [B, 1, F]
 
-                    # 교차 어텐션 적용
                     feat1_new, _ = self.similarity_net.cross_attention(
                         feat1_attn, feat2_attn, feat2_attn
                     )
@@ -320,20 +318,19 @@ class ImageMatchingModel(nn.Module):
                         feat2_attn, feat1_attn, feat1_attn
                     )
 
-                    # 최종 특성 생성
+                    # Generate last feature
                     feat1 = feat1_new.squeeze(1)
                     feat2 = feat2_new.squeeze(1)
             else:
-                # 기존 방식 사용
                 similarity, feat1, feat2 = self.similarity_net(x1, x2)
 
-            # 유사도 계산
+            # Calculate simiarity
             combined = torch.cat([
                 feat1, feat2, feat1 * feat2, torch.abs(feat1 - feat2)
             ], dim=1)
             similarity = self.similarity_net.similarity(combined)
 
-            # 포즈 추정이 필요한 경우
+            # Pose Estimation
             if x.get('mode') == 'pose' or x.get('mode') == 'full':
                 rotation, translation, confidence = self.pose_estimator(x1, x2)
                 return {
