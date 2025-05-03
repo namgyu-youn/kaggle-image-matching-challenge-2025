@@ -1,0 +1,33 @@
+version: '3'
+
+services:
+  image-matching:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      # Mount kaggle.json for API access
+      - ./docker/kaggle.json:/app/kaggle.json
+      # Mount docker files
+      - ./docker/data.sh:/app/data.sh
+      - ./docker/train.sh:/app/train.sh
+      - ./docker/config.yml:/app/config.yml
+      # Mount data directory to persist downloaded datasets
+      - ./data:/app/data
+      # Mount checkpoints to persist trained models
+      - ./checkpoints:/app/checkpoints
+      # Mount logs for tensorboard and other logging
+      - ./logs:/app/logs
+    environment:
+      # Set environment variables if needed
+      - CUDA_VISIBLE_DEVICES=0  # Adjust based on your GPU setup
+    # Use runtime: nvidia if you have nvidia-docker installed
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Override the default command if needed
+    # command: /bin/bash -c "./train.sh"
