@@ -120,7 +120,7 @@ class TrainingPipeline:
 
         # Basic augmentation
         transform = transforms.Compose([
-            transforms.RandomResizedCrop((480, 640), scale=(0.8, 1.0)),
+            transforms.RandomResizedCrop((1280, 1280), scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             transforms.ToTensor(),
