@@ -261,7 +261,10 @@ class Trainer:
 
         # Setup mixed precision training
         self.use_mixed_precision = config.get('use_mixed_precision', False)
+        self.precision = config.get('advanced', {}).get('precision', 'fp16')
+
         if self.use_mixed_precision:
+            self.scaler = GradScaler(enabled=self.precision != 'bf16')
             self.trainer = MixedPrecisionTrainer(self.model, self.optimizer, self.device)
 
         # Setup EMA
@@ -363,16 +366,18 @@ class Trainer:
             criterion: Loss function
         """
         num_epochs = self.config.get('epochs', 100)
+        gradient_accumulation_steps = self.config.get('gradient_accumulation_steps', 1)
 
         for epoch in range(num_epochs):
             # Training phase
             self.model.train()
             train_loss = 0.0
-            train_accuracy = 0.0  # Added accuracy tracking
+            train_accuracy = 0.0  # Accuracy tracking
             batch_count = 0
+            self.optimizer.zero_grad()  # Gradient initialization when epoch starts
 
             progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
-            for batch in progress_bar:
+            for i, batch in enumerate(progress_bar):
                 # Move batch to device
                 for k, v in batch.items():
                     if isinstance(v, torch.Tensor):
@@ -380,28 +385,57 @@ class Trainer:
 
                 # Training step
                 if self.use_mixed_precision:
-                    loss, outputs = self.trainer.train_step(batch, criterion)
+                    # Forward pass using mixed precision
+                    with autocast(device_type=str(self.device)):
+                        outputs = self.model(batch)
+                        loss = criterion(outputs, batch)
+                        # Scaling for accumulated gradient
+                        loss = loss / gradient_accumulation_steps
+
+                    # Gradient scaling
+                    self.scaler.scale(loss).backward()
+
+                    # Check accumulated gradient
+                    if (i + 1) % gradient_accumulation_steps == 0:
+                        # (Optional) gradient clipping
+                        if 'gradient_clip_val' in self.config:
+                            self.scaler.unscale_(self.optimizer)
+                            torch.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.config['gradient_clip_val']
+                            )
+
+                        # Optimization
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        self.optimizer.zero_grad()
                 else:
                     # Standard training
-                    self.optimizer.zero_grad()
                     outputs = self.model(batch)
                     loss = criterion(outputs, batch)
+                    loss = loss / gradient_accumulation_steps
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                    self.optimizer.step()
-                    loss = loss.item()
+
+                    if (i + 1) % gradient_accumulation_steps == 0:
+                        if 'gradient_clip_val' in self.config:
+                            torch.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.config['gradient_clip_val']
+                            )
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
 
                 # Calculate accuracy
                 with torch.no_grad():
                     accuracy = self.calculate_accuracy(outputs, batch)
 
-                train_loss += loss
+                train_loss += loss.item() * gradient_accumulation_steps  # 원래 손실값 추적
                 train_accuracy += accuracy
                 batch_count += 1
-                progress_bar.set_postfix({'loss': loss, 'acc': accuracy})
+                progress_bar.set_postfix({'loss': loss.item() * gradient_accumulation_steps, 'acc': accuracy})
 
                 # Update EMA model
-                if self.use_ema:
+                if self.use_ema and (i + 1) % gradient_accumulation_steps == 0:
                     self.ema.update()
 
             # Calculate average training metrics
@@ -502,7 +536,8 @@ class Trainer:
         Args:
             checkpoint_path: Path to checkpoint file
 
-        Returns:
+        Returns:                # Update EMA model
+
             int: Epoch number from checkpoint
         """
         checkpoint = torch.load(checkpoint_path, map_location=self.device)

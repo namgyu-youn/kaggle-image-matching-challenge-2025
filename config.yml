@@ -9,14 +9,15 @@ model:
   type: advanced
 
   # Feature dimension for embedding space
-  feature_dim: 4096
+  feature_dim: 12288
 
   # Backbone architecture (used with 'advanced' model type)
   # Options: resnet50, efficientnet_b3, vit_b_16, dinov2
   backbone: dinov2
 
-  num_layers: 12
+  num_layers: 24
   multi_scale: true
+  attention_heads: 16
 
 #------------------------------------------------------------------------------
 # Training Parameters
@@ -24,16 +25,16 @@ model:
 training:
   # Batch size - controls memory usage and training stability
   # Note: Values < 2 may cause BatchNorm issues
-  batch_size: 8
+  batch_size: 6
 
   # Number of complete passes through the training dataset
-  epochs: 200
+  epochs: 100
 
   # Base learning rate for optimization
-  learning_rate: 3.0e-5
+  learning_rate: 5.0e-5
 
   # Weight decay regularization factor
-  weight_decay: 3.0e-5
+  weight_decay: 5.0e-5
 
   # Optimizer selection
   # Options: adam, adamw, sgd
@@ -49,7 +50,7 @@ training:
   seed: 42
 
   # Prevent OOM maximizing GPU usage
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 2
   gradient_clip_val: 1.0
   sync_batchnorm: true
 
@@ -91,6 +92,7 @@ advanced:
   # Use mixed precision training (FP16)
   # Speeds up training with minimal accuracy impact
   use_mixed_precision: true
+  precision: 'bf16'
 
   # Use Exponential Moving Average of model weights
   # Improves stability and generalization
@@ -109,5 +111,6 @@ advanced:
 
   # Safety device for preventing OOM
   gradient_checkpointing: true
-  cudnn_benchmark: false
-  deterministic: true
+  cudnn_benchmark: true
+  torch_compile: true
+  deterministic: false

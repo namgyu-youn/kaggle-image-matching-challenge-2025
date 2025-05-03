@@ -101,13 +101,19 @@ class FeatureExtractor(nn.Module):
 
 class SimilarityNetwork(nn.Module):
     """Network to compute similarity between image pairs"""
-
-    def __init__(self, feature_dim=512):
+    def __init__(self, feature_dim=512, attention_heads=8):
         super().__init__()
 
         self.feature_extractor = FeatureExtractor(feature_dim=feature_dim)
 
-        # Enhanced similarity prediction head with non-linearities
+        # Build attention heads
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=feature_dim,
+            num_heads=attention_heads,
+            batch_first=True
+        )
+
+        # Similarity prediction matrix
         self.similarity = nn.Sequential(
             nn.Linear(feature_dim * 4, 512),
             nn.BatchNorm1d(512),
@@ -119,8 +125,7 @@ class SimilarityNetwork(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(256, 64),
             nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Linear(64, 1)
         )
 
     def extract_features(self, x):
@@ -132,15 +137,24 @@ class SimilarityNetwork(nn.Module):
         feat1 = self.extract_features(x1)
         feat2 = self.extract_features(x2)
 
-        # Concatenate features and their element-wise product
+        # Apply attention
+        if hasattr(self, 'cross_attention'):
+            # Adjust dimension
+            feat1_attn = feat1.unsqueeze(1)  # [B, 1, F]
+            feat2_attn = feat2.unsqueeze(1)  # [B, 1, F]
+
+            # Calculate cross attention
+            feat1_new, _ = self.cross_attention(feat1_attn, feat2_attn, feat2_attn)
+            feat2_new, _ = self.cross_attention(feat2_attn, feat1_attn, feat1_attn)
+
+            feat1 = feat1_new.squeeze(1)
+            feat2 = feat2_new.squeeze(1)
+
+        # Feature combination and calculate simiarity
         combined = torch.cat([
-            feat1,
-            feat2,
-            feat1 * feat2,  # Element-wise product for better similarity
-            torch.abs(feat1 - feat2)  # Absolute difference
+            feat1, feat2, feat1 * feat2, torch.abs(feat1 - feat2)
         ], dim=1)
 
-        # Predict similarity
         similarity = self.similarity(combined)
 
         return similarity, feat1, feat2
@@ -149,32 +163,40 @@ class SimilarityNetwork(nn.Module):
 class PoseEstimator(nn.Module):
     """Network to estimate camera pose"""
 
-    def __init__(self, feature_dim=512):
+    def __init__(self, feature_dim=512, num_layers=None, attention_heads=8):
         super().__init__()
 
         self.feature_extractor = FeatureExtractor(feature_dim=feature_dim)
 
-        # Enhanced pose estimation head
-        self.pose_regressor = nn.Sequential(
-            nn.Linear(feature_dim * 4, 1024),
-            nn.BatchNorm1d(1024),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1024, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(512, 256),
-            nn.ReLU()
+        # Handle num_layers
+        hidden_dims = [1024, 512, 256] if num_layers is None else [1024] * (num_layers // 3)
+
+        # Attention layer
+        self.self_attention = nn.MultiheadAttention(
+            embed_dim=feature_dim,
+            num_heads=attention_heads,
+            batch_first=True
         )
 
-        # Separate heads for rotation and translation
-        self.rotation_head = nn.Linear(256, 9)  # 3x3 rotation matrix
-        self.translation_head = nn.Linear(256, 3)  # 3D translation vector
+        layers = []
+        input_dim = feature_dim * 4
 
-        # Confidence score for prediction quality
+        for dim in hidden_dims:
+            layers.extend([
+                nn.Linear(input_dim, dim),
+                nn.BatchNorm1d(dim),
+                nn.ReLU(),
+                nn.Dropout(0.3)
+            ])
+            input_dim = dim
+
+        self.pose_regressor = nn.Sequential(*layers)
+
+        # Separate heads for rotation and translation
+        self.rotation_head = nn.Linear(hidden_dims[-1], 9)  # 3x3 rotation matrix
+        self.translation_head = nn.Linear(hidden_dims[-1], 3)  # 3D translation vector
         self.confidence_head = nn.Sequential(
-            nn.Linear(256, 64),
+            nn.Linear(hidden_dims[-1], 64),
             nn.ReLU(),
             nn.Linear(64, 1),
             nn.Sigmoid()
@@ -219,19 +241,36 @@ class PoseEstimator(nn.Module):
 class ImageMatchingModel(nn.Module):
     """Combined model for clustering and pose estimation"""
 
-    def __init__(self, feature_dim=512, backbone='resnet50'):
+    def __init__(self, feature_dim=512, backbone='resnet50', num_layers=None,
+                multi_scale=False, attention_heads=8):
         super().__init__()
 
-        self.similarity_net = SimilarityNetwork(feature_dim=feature_dim)
+        self.multi_scale = multi_scale
+
+        # 기본 네트워크 구성
+        self.similarity_net = SimilarityNetwork(
+            feature_dim=feature_dim,
+            attention_heads=attention_heads
+        )
 
         # Use the same backbone type for both networks
         self.similarity_net.feature_extractor.backbone = backbone
 
-        self.pose_estimator = PoseEstimator(feature_dim=feature_dim)
+        # Pose Estimation
+        self.pose_estimator = PoseEstimator(
+            feature_dim=feature_dim,
+            num_layers=num_layers,
+            attention_heads=attention_heads
+        )
         self.pose_estimator.feature_extractor.backbone = backbone
 
-        # Optional: Share weights between feature extractors
-        # self.pose_estimator.feature_extractor = self.similarity_net.feature_extractor
+        # Multi-scaling process
+        if multi_scale:
+            self.scale_weights = nn.Parameter(torch.ones(3))
+            self.scale_layers = nn.ModuleList([
+                nn.Conv2d(feature_dim, feature_dim, 1)
+                for _ in range(3)
+            ])
 
     def forward(self, x):
         """Forward pass based on mode"""
@@ -242,12 +281,59 @@ class ImageMatchingModel(nn.Module):
             elif 'img1' in x and 'img2' in x:
                 x1, x2 = x['img1'], x['img2']
             else:
-                raise KeyError(f"Required image keys not found in input dictionary. Available keys: {list(x.keys())}")
+                raise KeyError(f"Required image keys not found in input dictionary")
 
-            # Get similarity
-            similarity, feat1, feat2 = self.similarity_net(x1, x2)
+            # Get similarity using multi scaling
+            if self.multi_scale:
+                # 원본 크기 특성
+                feat1_orig = self.similarity_net.feature_extractor(x1)
+                feat2_orig = self.similarity_net.feature_extractor(x2)
 
-            # Get pose if needed
+                # 다운샘플링된 특성
+                x1_down = F.interpolate(x1, scale_factor=0.5, mode='bilinear')
+                x2_down = F.interpolate(x2, scale_factor=0.5, mode='bilinear')
+                feat1_down = self.similarity_net.feature_extractor(x1_down)
+                feat2_down = self.similarity_net.feature_extractor(x2_down)
+
+                # 업샘플링된 특성
+                if feat1_down.dim() > 2:
+                    feat1_down = F.adaptive_avg_pool2d(feat1_down, 1).squeeze(-1).squeeze(-1)
+                    feat2_down = F.adaptive_avg_pool2d(feat2_down, 1).squeeze(-1).squeeze(-1)
+
+                # 특성 융합 (가중치 학습)
+                weights = F.softmax(self.scale_weights, dim=0)
+                feat1 = weights[0] * feat1_orig + weights[1] * feat1_down
+                feat2 = weights[0] * feat2_orig + weights[1] * feat2_down
+
+                # 어텐션 적용
+                if hasattr(self.similarity_net, 'cross_attention'):
+                    # 차원 조정 (필요시)
+                    if feat1.dim() == 2:
+                        feat1_attn = feat1.unsqueeze(1)  # [B, 1, F]
+                        feat2_attn = feat2.unsqueeze(1)  # [B, 1, F]
+
+                    # 교차 어텐션 적용
+                    feat1_new, _ = self.similarity_net.cross_attention(
+                        feat1_attn, feat2_attn, feat2_attn
+                    )
+                    feat2_new, _ = self.similarity_net.cross_attention(
+                        feat2_attn, feat1_attn, feat1_attn
+                    )
+
+                    # 최종 특성 생성
+                    feat1 = feat1_new.squeeze(1)
+                    feat2 = feat2_new.squeeze(1)
+            else:
+                # 기존 방식 사용
+                similarity, feat1, feat2 = self.similarity_net(x1, x2)
+
+            # 유사도 계산
+            combined = torch.cat([
+                feat1, feat2, feat1 * feat2, torch.abs(feat1 - feat2)
+            ], dim=1)
+            similarity = self.similarity_net.similarity(combined)
+
+            # 포즈 추정이 필요한 경우
             if x.get('mode') == 'pose' or x.get('mode') == 'full':
                 rotation, translation, confidence = self.pose_estimator(x1, x2)
                 return {

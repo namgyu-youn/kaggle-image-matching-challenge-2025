@@ -189,8 +189,9 @@ class DatasetPairs(Dataset):
         }
 
 
-def get_dataloaders(data_dir, batch_size=32, num_workers=4, transform=None):
-    """Create dataloaders for training and validation"""
+def get_dataloaders(data_dir, batch_size=6, num_workers=4, transform=None,
+                   pin_memory=True, prefetch_factor=2, persistent_workers=True):
+    """Create dataloaders for training and validation with optimized settings"""
     # Training dataset
     train_dataset = ImageMatchingDataset(data_dir, mode='train', transform=transform)
     train_pairs = DatasetPairs(train_dataset)
@@ -204,12 +205,16 @@ def get_dataloaders(data_dir, batch_size=32, num_workers=4, transform=None):
         train_pairs, [train_size, val_size]
     )
 
+    # Optimized dataloader
     train_loader = DataLoader(
         train_subset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=pin_memory,
+        prefetch_factor=prefetch_factor,
+        persistent_workers=persistent_workers and num_workers > 0,
+        drop_last=True
     )
 
     val_loader = DataLoader(
@@ -217,7 +222,9 @@ def get_dataloaders(data_dir, batch_size=32, num_workers=4, transform=None):
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=pin_memory,
+        prefetch_factor=prefetch_factor,
+        persistent_workers=persistent_workers and num_workers > 0
     )
 
     return train_loader, val_loader

@@ -5,6 +5,8 @@ set -e  # Exit on error
 # Default settings
 DATA_DIR="./data"
 KAGGLE_COMPETITION="image-matching-challenge-2025"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KAGGLE_JSON="$SCRIPT_DIR/kaggle.json"
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -38,10 +40,19 @@ fi
 
 # 2. Check authentication
 echo "[STEP] Verifying Kaggle credentials..."
-if [[ ! -f ~/.kaggle/kaggle.json ]]; then
-  echo "[ERROR] kaggle.json not found. Place credentials in ~/.kaggle/kaggle.json" >&2
+if [[ ! -f "$KAGGLE_JSON" ]]; then
+  echo "[ERROR] kaggle.json not found in script directory. Place credentials file in the same directory as this script." >&2
   exit 1
 fi
+
+# Create temporary Kaggle config directory if not exists
+if [[ ! -d ~/.kaggle ]]; then
+  mkdir -p ~/.kaggle
+fi
+
+# Copy the kaggle.json to the standard location temporarily
+cp "$KAGGLE_JSON" ~/.kaggle/kaggle.json
+chmod 600 ~/.kaggle/kaggle.json
 
 # 3. Prepare directories
 echo "[STEP] Creating directories..."
@@ -66,7 +77,6 @@ if [[ -d "test" ]]; then
   cp -rn test/* "$DATA_DIR/test/"
   rm -r test
 fi
-
 
 # 7. Summary
 echo "[STEP] Generating summary..."

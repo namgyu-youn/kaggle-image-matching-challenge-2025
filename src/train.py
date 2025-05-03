@@ -79,12 +79,25 @@ class TrainingPipeline:
         self.trainer = Trainer(self.model, self.config)
 
     def _create_model(self):
-        """Create model based on configuration"""
         model_type = self.config.get('model_type', 'dino')
         feature_dim = self.config.get('feature_dim', 512)
 
-        if model_type == 'dino':
-            model = DINOv2FeatureExtractor(feature_dim=feature_dim)
+        # Advanced parameters : multi_scale, attention_haeds
+        model_config = self.config.get('model', {})
+        num_layers = model_config.get('num_layers')
+        multi_scale = model_config.get('multi_scale', False)
+        attention_heads = model_config.get('attention_heads', 8)
+
+        if model_type == 'advanced':
+            backbone = model_config.get('backbone', 'resnet50')
+            model = ImageMatchingModel(
+                feature_dim=feature_dim,
+                backbone=backbone,
+                num_layers=num_layers,
+                multi_scale=multi_scale,
+                attention_heads=attention_heads
+            )
+            self.logger.info(f"Created advanced model with multi_scale={multi_scale}, attention_heads={attention_heads}")
         elif model_type == 'loftr':
             model = LoFTRFeatureMatcher()
         elif model_type == 'superglue':
@@ -94,6 +107,17 @@ class TrainingPipeline:
             model = ImageMatchingModel(feature_dim=feature_dim, backbone=backbone)
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
+
+        # Torch compile
+        if self.config.get('advanced', {}).get('torch_compile', False):
+            try:
+                import torch._dynamo
+                self.logger.info("Compiling model with torch.compile...")
+                # Mode options: 'default', 'reduce-overhead', 'max-autotune'
+                model = torch.compile(model, mode='reduce-overhead')
+                self.logger.info("Model compilation successful")
+            except Exception as e:
+                self.logger.warning(f"Failed to compile model: {e}")
 
         # Resume from checkpoint if specified
         if 'resume' in self.config and self.config['resume']:
@@ -115,26 +139,40 @@ class TrainingPipeline:
         return model
 
     def _create_dataloaders(self):
-        """Create dataloaders with minimal augmentation"""
+        """Create dataloaders with optimized settings"""
         data_dir = Path(self.config['data_dir'])
+        batch_size = self.config.get('batch_size', 32)
 
-        # Basic augmentation
+        # Cofigs for optimizing data loader
+        num_workers = self.config.get('num_workers', min(os.cpu_count(), 16))  # CPU-core
+        pin_memory = self.config.get('pin_memory', True)
+        prefetch_factor = self.config.get('prefetch_factor', 2)  # Batch for preloading
+        persistent_workers = self.config.get('persistent_workers', True)  # Reuse workers
+
+        # Basuc transform
         transform = transforms.Compose([
-            transforms.RandomResizedCrop((1280, 1280), scale=(0.8, 1.0)),
+            transforms.RandomResizedCrop((1024, 1024), scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                               std=[0.229, 0.224, 0.225])
+                            std=[0.229, 0.224, 0.225])
         ])
 
         # Get dataloaders
         train_loader, val_loader = get_dataloaders(
             data_dir,
-            batch_size=self.config.get('batch_size', 32),
-            num_workers=self.config.get('num_workers', 4),
-            transform=transform
+            batch_size=batch_size,
+            num_workers=num_workers,
+            transform=transform,
+            pin_memory=pin_memory,
+            prefetch_factor=prefetch_factor,
+            persistent_workers=persistent_workers
         )
+
+        # Logs for generated data loader
+        self.logger.info(f"Created dataloaders with batch_size={batch_size}, num_workers={num_workers}")
+        self.logger.info(f"Training samples: {len(train_loader.dataset)}, validation samples: {len(val_loader.dataset)}")
 
         return train_loader, val_loader
 

@@ -136,6 +136,7 @@ fi
 print_step "Installing prerequisites..."
 
 # Check if uv is installed
+export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv &> /dev/null; then
     print_warning "uv is not installed. Installing..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
