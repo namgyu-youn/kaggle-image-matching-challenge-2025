@@ -16,9 +16,7 @@ from src.models import (
     LoFTRFeatureMatcher,
     SuperGlueMatchingModule
 )
-from src.trainer import (
-    Trainer
-)
+from src.trainer import Trainer
 from src.loss import get_metric_learning_loss, CombinedLoss
 from src.evaluation import evaluate_model
 
@@ -39,17 +37,13 @@ class TrainingPipeline:
     """Training pipeline for image matching models"""
 
     def __init__(self, config):
-        """
-        Initialize training pipeline
-
-        Args:
-            config: Dictionary with training configuration
-        """
+        """Initialize training pipeline"""
         self.config = config
         self.device = torch.device(config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
 
         # Set random seed
-        set_seed(config.get('seed', 42))
+        seed = config.get('training', {}).get('seed')
+        set_seed(seed)
 
         # Create directories
         self.checkpoint_dir = Path(config.get('checkpoint_dir', 'checkpoints'))
@@ -79,17 +73,17 @@ class TrainingPipeline:
         self.trainer = Trainer(self.model, self.config)
 
     def _create_model(self):
-        model_type = self.config.get('model_type', 'dino')
-        feature_dim = self.config.get('feature_dim', 512)
-
-        # Advanced parameters : multi_scale, attention_haeds
         model_config = self.config.get('model', {})
+        model_type = model_config.get('type', 'dino')
+        feature_dim = model_config.get('feature_dim', 512)
+
+        # Advanced parameters
         num_layers = model_config.get('num_layers')
         multi_scale = model_config.get('multi_scale', False)
         attention_heads = model_config.get('attention_heads', 8)
+        backbone = model_config.get('backbone', 'resnet50')
 
         if model_type == 'advanced':
-            backbone = model_config.get('backbone', 'resnet50')
             model = ImageMatchingModel(
                 feature_dim=feature_dim,
                 backbone=backbone,
@@ -97,21 +91,18 @@ class TrainingPipeline:
                 multi_scale=multi_scale,
                 attention_heads=attention_heads
             )
-            self.logger.info(f"Created advanced model with multi_scale={multi_scale}, attention_heads={attention_heads}")
+            self.logger.info(f"Created advanced model with backbone={backbone}")
         elif model_type == 'loftr':
             model = LoFTRFeatureMatcher()
         elif model_type == 'superglue':
             model = SuperGlueMatchingModule()
-        elif model_type == 'advanced':
-            backbone = self.config.get('backbone', 'resnet50')
-            model = ImageMatchingModel(feature_dim=feature_dim, backbone=backbone)
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
+        else:  # Default to dino
+            model = DINOv2FeatureExtractor()
 
         # Torch compile
-        if self.config.get('advanced', {}).get('torch_compile', False):
+        advanced_config = self.config.get('advanced', {})
+        if advanced_config.get('torch_compile', False):
             try:
-                import torch._dynamo
                 self.logger.info("Compiling model with torch.compile...")
                 # Mode options: 'default', 'reduce-overhead', 'max-autotune'
                 model = torch.compile(model, mode='reduce-overhead')
@@ -120,7 +111,7 @@ class TrainingPipeline:
                 self.logger.warning(f"Failed to compile model: {e}")
 
         # Resume from checkpoint if specified
-        if 'resume' in self.config and self.config['resume']:
+        if self.config.get('resume'):
             checkpoint_path = self.config['resume']
             if os.path.exists(checkpoint_path):
                 self.logger.info(f"Resuming from checkpoint: {checkpoint_path}")
@@ -141,15 +132,15 @@ class TrainingPipeline:
     def _create_dataloaders(self):
         """Create dataloaders with optimized settings"""
         data_dir = Path(self.config['data_dir'])
-        batch_size = self.config.get('batch_size', 32)
+        training_config = self.config.get('training', {})
+        batch_size = training_config.get('batch_size')
 
-        # Cofigs for optimizing data loader
-        num_workers = self.config.get('num_workers', min(os.cpu_count(), 16))  # CPU-core
-        pin_memory = self.config.get('pin_memory', True)
-        prefetch_factor = self.config.get('prefetch_factor', 2)  # Batch for preloading
-        persistent_workers = self.config.get('persistent_workers', True)  # Reuse workers
+        # Configs for optimizing data loader
+        num_workers = self.config.get('num_workers', min(os.cpu_count(), 16))
+        prefetch_factor = 2
+        pin_memory, persistent_workers = True, True
 
-        # Basuc transform
+        # Basic transform
         transform = transforms.Compose([
             transforms.RandomResizedCrop((1024, 1024), scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(),
@@ -170,7 +161,7 @@ class TrainingPipeline:
             persistent_workers=persistent_workers
         )
 
-        # Logs for generated data loader
+        # Log dataloader info
         self.logger.info(f"Created dataloaders with batch_size={batch_size}, num_workers={num_workers}")
         self.logger.info(f"Training samples: {len(train_loader.dataset)}, validation samples: {len(val_loader.dataset)}")
 
@@ -178,31 +169,33 @@ class TrainingPipeline:
 
     def _create_loss(self):
         """Create loss function based on configuration"""
-        loss_type = self.config.get('loss_type', 'combined')
+        loss_config = self.config.get('loss', {})
+        loss_type = loss_config.get('type', 'combined')
 
         if loss_type == 'metric_learning':
-            # Advanced metric learning loss
             return get_metric_learning_loss(
-                self.config.get('metric_loss', 'supcon'),
-                temperature=self.config.get('temperature', 0.07)
+                loss_config.get('metric_loss'),
+                temperature=loss_config.get('temperature')
             )
         else:
-            # Default combined loss
             return CombinedLoss(
-                similarity_weight=self.config.get('similarity_weight', 1.0),
-                pose_weight=self.config.get('pose_weight', 1.0),
-                contrastive_margin=self.config.get('contrastive_margin', 1.0),
-                rotation_weight=self.config.get('rotation_weight', 1.0),
-                translation_weight=self.config.get('translation_weight', 1.0)
+                similarity_weight=loss_config.get('similarity_weight'),
+                pose_weight=loss_config.get('pose_weight'),
+                contrastive_margin=loss_config.get('contrastive_margin'),
+                rotation_weight=loss_config.get('rotation_weight'),
+                translation_weight=loss_config.get('translation_weight')
             )
 
     def train(self):
         """Train the model"""
+        model_config = self.config.get('model')
+        training_config = self.config.get('training')
+
         self.logger.info("Starting training...")
-        self.logger.info(f"Model type: {self.config.get('model_type', 'dino')}")
-        self.logger.info(f"Batch size: {self.config.get('batch_size', 32)}")
-        self.logger.info(f"Learning rate: {self.config.get('learning_rate', 1e-4)}")
-        self.logger.info(f"Epochs: {self.config.get('epochs', 100)}")
+        self.logger.info(f"Model type: {model_config.get('type', 'dino')}")
+        self.logger.info(f"Batch size: {training_config.get('batch_size')}")
+        self.logger.info(f"Learning rate: {training_config.get('learning_rate')}")
+        self.logger.info(f"Epochs: {training_config.get('epochs')}")
 
         # Train the model
         self.trainer.train(self.train_loader, self.val_loader, self.criterion)
@@ -235,16 +228,10 @@ class TrainingPipeline:
 
 
 def parse_args():
-    """Parse command line arguments for non-performance-related parameters only"""
+    """Minimal argument parsing with hardcoded paths"""
     parser = argparse.ArgumentParser(description='Train image matching model')
-
-    # Non-performance-related arguments
-    parser.add_argument('--data_dir', type=str, required=True, help='Path to dataset directory')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Directory to save checkpoints')
-    parser.add_argument('--log_dir', type=str, default='logs', help='Directory to save logs')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
-    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
-
+    parser.add_argument('--resume', type=str, default=None,
+                        help='Path to checkpoint to resume from')
     return parser.parse_args()
 
 
@@ -253,73 +240,48 @@ def load_config():
     config_path = Path('config.yml')
 
     if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+        print(f"Warning: Configuration file not found: {config_path}")
+        return {}
 
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-
-    # Convert nested dictionary to flat dictionary
-    flat_config = {}
-
-    # Model parameters
-    flat_config['model_type'] = config['model']['type']  # Map 'type' to 'model_type'
-    flat_config['feature_dim'] = config['model']['feature_dim']
-    flat_config['backbone'] = config['model']['backbone']
-
-    # Training parameters
-    flat_config['batch_size'] = config['training']['batch_size']
-    flat_config['epochs'] = config['training']['epochs']
-    flat_config['learning_rate'] = config['training']['learning_rate']
-    flat_config['weight_decay'] = config['training']['weight_decay']
-    flat_config['optimizer'] = config['training']['optimizer']
-    flat_config['warmup_epochs'] = config['training']['warmup_epochs']
-    flat_config['min_learning_rate'] = config['training']['min_learning_rate']
-    flat_config['seed'] = config['training']['seed']
-
-    # Loss parameters
-    flat_config['loss_type'] = config['loss']['type']
-    flat_config['metric_loss'] = config['loss']['metric_loss']
-    flat_config['temperature'] = config['loss']['temperature']
-    flat_config['similarity_weight'] = config['loss']['similarity_weight']
-    flat_config['pose_weight'] = config['loss']['pose_weight']
-    flat_config['contrastive_margin'] = config['loss']['contrastive_margin']
-    flat_config['rotation_weight'] = config['loss']['rotation_weight']
-    flat_config['translation_weight'] = config['loss']['translation_weight']
-
-    # Advanced parameters
-    flat_config['use_mixed_precision'] = config['advanced']['use_mixed_precision']
-    flat_config['use_ema'] = config['advanced']['use_ema']
-    flat_config['ema_decay'] = config['advanced']['ema_decay']
-
-    return flat_config
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+        return {}
 
 
 def main():
     """Main function"""
-    # Parse command line arguments for non-performance-related parameters
+    # Get args related to resume
     args = parse_args()
 
     # Load performance-related parameters from config.yml
     config = load_config()
 
-    # Add non-performance-related parameters from command line
-    config['data_dir'] = args.data_dir
-    config['checkpoint_dir'] = args.checkpoint_dir
-    config['log_dir'] = args.log_dir
-    config['num_workers'] = args.num_workers
-    config['resume'] = args.resume
+    # Set hardcoded paths
+    config['data_dir'] = './data'
+    config['checkpoint_dir'] = 'checkpoints'
+    config['log_dir'] = 'logs'
+    config['num_workers'] = 4
+
+    # Add resume if provided
+    if args.resume:
+        config['resume'] = args.resume
 
     # Save configuration
     log_dir = Path(config['log_dir'])
     log_dir.mkdir(exist_ok=True, parents=True)
 
-    with open(log_dir / 'config.json', 'w') as f:
-        json.dump(config, f, indent=4)
+    try:
+        with open(log_dir / 'config.json', 'w') as f:
+            json.dump(config, f, indent=4)
+    except Exception as e:
+        print(f"Warning: Failed to save configuration: {e}")
 
-    # Create training pipeline
+    # Create and run training pipeline
     pipeline = TrainingPipeline(config)
-
-    # Train model
     model = pipeline.train()
 
     return model

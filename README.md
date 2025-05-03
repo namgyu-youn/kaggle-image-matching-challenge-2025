@@ -69,16 +69,3 @@ dataset2,cluster1,image2.png,nan;nan;nan;nan;nan;nan;nan;nan;nan,nan;nan;nan
 ```
 
 Notice that we can re-use scene labels (such as `cluster1`) for different datasets.
-
-## Usage
-
-```bash
-chmod +x setup_dataset.sh
-chmod +x train.sh
-
-# Build dataset
-./setup_dataset.sh
-
-# Train the model
-./train.sh --data_dir ./dataset/train
-```
