@@ -522,18 +522,22 @@ class Trainer:
         }
 
         # Save latest checkpoint
-        torch.save(checkpoint, self.checkpoint_dir / 'checkpoint_latest.pth')
+        filename = f"{val_loss:.4f}_epoch{epoch}.pth"
+        torch.save(checkpoint, self.checkpoint_dir / filename)
+
+        # Clean up checkpoints
+        self._cleanup_checkpoints(max_keep=3)
 
         # Save best checkpoint
         if is_best:
-            torch.save(checkpoint, self.checkpoint_dir / f"{val_loss:.4f}.pth")
+            torch.save(checkpoint, self.checkpoint_dir / 'checkpoint_best.pth')
             self.logger.info(f"Saved best model checkpoint with val_loss: {val_loss:.4f}, val_accuracy: {val_accuracy:.4f}")
 
     def _cleanup_checkpoints(self, max_keep=3):
-        checkpoint_files = [f for f in self.checkpoint_dir.glob("*.pth")
-                           if not ('best' in f.name or 'latest' in f.name)]
+        checkpoint_files = [f for f in self.checkpoint_dir.glob("*_epoch*.pth")
+                        if 'best' not in f.name]
 
-        checkpoint_files.sort(key=lambda x: float(x.stem))
+        checkpoint_files.sort(key=lambda x: float(x.stem.split('_')[0]))
 
         # Clean up if N > 3
         if len(checkpoint_files) > max_keep:
