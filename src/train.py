@@ -17,7 +17,7 @@ from src.models import (
     SuperGlueMatchingModule
 )
 from src.trainer import Trainer
-from src.loss import get_metric_learning_loss, CombinedLoss
+from src.loss import get_metric_learning_loss, get_enhanced_loss, CombinedLoss
 from src.evaluation import evaluate_model
 
 
@@ -177,6 +177,17 @@ class TrainingPipeline:
                 loss_config.get('metric_loss'),
                 temperature=loss_config.get('temperature')
             )
+        elif loss_type == 'enhanced':
+            return get_enhanced_loss(
+                similarity_weight=loss_config.get('similarity_weight', 1.5),
+                pose_weight=loss_config.get('pose_weight', 0.5),
+                contrastive_margin=loss_config.get('contrastive_margin', 1.0),
+                rotation_weight=loss_config.get('rotation_weight', 1.0),
+                translation_weight=loss_config.get('translation_weight', 1.0),
+                temperature=loss_config.get('temperature', 0.07),
+                use_adaptive_weights=loss_config.get('use_adaptive_weights', True),
+                use_focal_loss=loss_config.get('use_focal_loss', True)
+            )
         else:
             return CombinedLoss(
                 similarity_weight=loss_config.get('similarity_weight'),
@@ -193,9 +204,6 @@ class TrainingPipeline:
 
         self.logger.info("Starting training...")
         self.logger.info(f"Model type: {model_config.get('type', 'dino')}")
-        self.logger.info(f"Batch size: {training_config.get('batch_size')}")
-        self.logger.info(f"Learning rate: {training_config.get('learning_rate')}")
-        self.logger.info(f"Epochs: {training_config.get('epochs')}")
 
         # Train the model
         self.trainer.train(self.train_loader, self.val_loader, self.criterion)

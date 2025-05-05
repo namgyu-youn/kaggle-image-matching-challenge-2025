@@ -59,16 +59,8 @@ training:
 #------------------------------------------------------------------------------
 loss:
   # Primary loss function type
-  # Options: combined, metric_learning
-  type: combined
-
-  # Metric learning loss variant (when type = metric_learning)
-  # Options: arcface, circle, multi_similarity, supcon, triplet_hard, proxy_nca
-  metric_loss: supcon
-
-  # Temperature parameter for contrastive losses
-  # Controls the sharpness of similarity distribution
-  temperature: 0.07
+  # Options: combined, enhanced, metric_learning
+  type: enhanced
 
   # Weight for similarity loss component
   similarity_weight: 1.5
@@ -79,11 +71,21 @@ loss:
   # Margin for contrastive loss
   contrastive_margin: 1.0
 
+  # Temperature parameter for contrastive losses
+  # Controls the sharpness of similarity distribution
+  temperature: 0.07
+
   # Weight for rotation component in pose loss
   rotation_weight: 1.0
 
   # Weight for translation component in pose loss
   translation_weight: 1.0
+
+  # Use adaptive weights based on loss values
+  use_adaptive_weights: true
+
+  # Use focal loss for similarity prediction
+  use_focal_loss: true
 
 #------------------------------------------------------------------------------
 # Advanced Training Options
