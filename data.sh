@@ -5,8 +5,7 @@ set -e  # Exit on error
 # Default settings
 DATA_DIR="./data"
 KAGGLE_COMPETITION="image-matching-challenge-2025"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KAGGLE_JSON="$SCRIPT_DIR/kaggle.json"
+KAGGLE_JSON="./kaggle.json"
 
 # 1. Install and check Kaggle API
 echo "[STEP] Installing/checking Kaggle API..."
@@ -32,6 +31,7 @@ kaggle competitions download -c "$KAGGLE_COMPETITION" -p .
 # 5. Extract the ZIP file
 echo "[STEP] Extracting dataset..."
 zip_file=$(find . -maxdepth 1 -name '*.zip' | head -n1)
+apt-get install zip unzip
 unzip -o -q "$zip_file"
 
 # 6. Organize train/test folders
