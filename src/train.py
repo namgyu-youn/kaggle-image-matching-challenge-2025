@@ -200,7 +200,6 @@ class TrainingPipeline:
     def train(self):
         """Train the model"""
         model_config = self.config.get('model')
-        training_config = self.config.get('training')
 
         self.logger.info("Starting training...")
         self.logger.info(f"Model type: {model_config.get('type', 'dino')}")

@@ -304,56 +304,28 @@ class Trainer:
         Returns:
             float: Accuracy value
         """
-        # Implementation depends on the specific model and task
-        # Here's a generic implementation that should be adapted to your specific needs
+        if isinstance(outputs, dict):
+            if 'similarity' in outputs and 'label' in batch:
+                similarity = outputs['similarity'].squeeze()
+                predictions = (torch.sigmoid(similarity) > 0.5).float()
+                labels = batch['label'].float()
+                # Calculate accuracy
+                correct = (predictions == labels).sum().item()
+                total = labels.size(0)
+                return correct / total if total > 0 else 0.0
 
         # If outputs is a tuple, use the first element (typically class scores or features)
-        if isinstance(outputs, tuple):
-            outputs = outputs[0]
+        elif isinstance(outputs, tuple) and len(outputs) > 0:
+            if isinstance(outputs[0], torch.Tensor) and 'label' in batch:
+                similarity = outputs[0].squeeze()
+                predictions = (torch.sigmoid(similarity) > 0.5).float()
+                labels = batch['label'].float()
+                correct = (predictions == labels).sum().item()
+                total = labels.size(0)
+                return correct / total if total > 0 else 0.0
 
-        # Extract targets from batch based on available keys
-        if 'labels' in batch:
-            targets = batch['labels']
-        elif 'target_indices' in batch:
-            targets = batch['target_indices']
-        elif 'matches' in batch:
-            targets = batch['matches']
-        elif 'correspondences' in batch:
-            targets = batch['correspondences']
-        else:
-            # If no appropriate target is found, return 0.0
-            return 0.0
-
-        # For feature matching (feature vectors, dim=2)
-        if outputs.dim() == 2:
-            # Normalize feature vectors
-            outputs = F.normalize(outputs, p=2, dim=1)
-            # Compute similarity matrix
-            sim_matrix = torch.matmul(outputs, outputs.t())
-            # Exclude self-similarity (set diagonal to very low value)
-            sim_matrix.fill_diagonal_(-10000.0)
-            # Find most similar items
-            _, pred_indices = sim_matrix.topk(1, dim=1)
-            pred_indices = pred_indices.squeeze()
-
-            # If targets are class indices
-            if targets.dim() == 1:
-                correct = (pred_indices == targets).sum().item()
-                return correct / targets.size(0)
-            # If targets are matching matrices
-            else:
-                # Simple example: use row-wise max as target indices
-                _, target_indices = targets.max(dim=1)
-                correct = (pred_indices == target_indices).sum().item()
-                return correct / targets.size(0)
-
-        # For classification problems
-        elif outputs.dim() > 2:
-            _, predicted = torch.max(outputs, 1)
-            correct = (predicted == targets).sum().item()
-            return correct / targets.size(0)
-
-        # Default fallback
+        # Failed log message if failed to calcuate accuracy
+        print(f"Failed to calculate accuracy: Output format={type(outputs)}, Batch key={list(batch.keys())}")
         return 0.0
 
     def train(self, train_loader, val_loader, criterion):

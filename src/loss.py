@@ -240,7 +240,6 @@ class EnhancedCombinedLoss(nn.Module):
             if torch.sum(targets['label']) > 0:  # Positive sample exist
                 # Feature label connection
                 features = torch.cat([predictions['feat1'], predictions['feat2']], dim=0)
-                batch_size = predictions['feat1'].size(0)
                 labels = torch.cat([targets['label'], targets['label']], dim=0)
 
                 supcon_loss = self.supcon_loss(features, labels)

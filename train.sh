@@ -85,11 +85,8 @@ print_success "Directories created."
 
 # Construct training command
 print_step "Constructing training command..."
-TRAIN_CMD="uv run python src/train.py --data_dir $DATA_DIR --checkpoint_dir $CHECKPOINT_DIR --log_dir $LOG_DIR --num_workers $NUM_WORKERS"
+TRAIN_CMD="uv run python src/train.py"
 
-# Display configuration summary
-print_step "Configuration Summary:"
-echo "  - Model Type: $MODEL_TYPE (defined in config.yml)"
 # Start training
 print_step "Starting training..."
 echo -e "${BLUE}Execution Command:${NC} $TRAIN_CMD"
