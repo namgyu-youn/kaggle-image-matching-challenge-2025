@@ -9,12 +9,9 @@ from .models import (
 )
 from .loss import (
     ContrastiveLoss,
-    TripletLoss,
     PoseLoss,
-    CombinedLoss,
 )
 from .trainer import Trainer
-from .inference import InferencePipeline
 
 __version__ = "0.1.0"
 
@@ -27,9 +24,6 @@ __all__ = [
     "PoseEstimator",
     "ImageMatchingModel",
     "ContrastiveLoss",
-    "TripletLoss",
     "PoseLoss",
-    "CombinedLoss",
     "Trainer",
-    "InferencePipeline",
 ]
